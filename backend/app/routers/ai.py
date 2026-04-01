@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,5 +37,18 @@ async def invoke_ai(payload: AIInvokeRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/history", response_model=list[AIInteractionRead])
-def list_history(db: Session = Depends(get_db)):
-    return db.scalars(select(AIInteraction).order_by(AIInteraction.created_at.desc())).all()
+def list_history(
+    document_id: int | None = Query(default=None),
+    feature: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    statement = select(AIInteraction).order_by(AIInteraction.created_at.desc()).limit(limit)
+
+    if document_id is not None:
+        statement = statement.where(AIInteraction.document_id == document_id)
+
+    if feature is not None:
+        statement = statement.where(AIInteraction.feature == feature)
+
+    return db.scalars(statement).all()

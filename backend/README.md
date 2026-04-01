@@ -25,3 +25,14 @@ The backend accepts either:
 - or a full OpenAI-compatible path ending in `/v1`
 
 If you want to test the backend without LM Studio first, set `LLM_MOCK=true`.
+
+## AI endpoints
+
+- `POST /api/ai/invoke`
+- `GET /api/ai/history`
+
+`/api/ai/history` supports:
+
+- `document_id`
+- `feature`
+- `limit`
