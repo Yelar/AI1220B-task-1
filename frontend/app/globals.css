@@ -1,22 +1,94 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f1e8;
-  --foreground: #111827;
+  --background: #f3ede2;
+  --foreground: #12202b;
+  --surface: rgba(255, 252, 247, 0.84);
+  --surface-strong: #fffaf1;
+  --line: rgba(18, 32, 43, 0.12);
+  --accent: #c96b2c;
+  --accent-strong: #0f766e;
+  --danger: #b91c1c;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(201, 107, 44, 0.2), transparent 30%),
+    radial-gradient(circle at 85% 15%, rgba(15, 118, 110, 0.18), transparent 24%),
+    linear-gradient(180deg, #f7f0e5 0%, #efe7db 100%);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-display), Arial, Helvetica, sans-serif;
+}
+
+* {
+  border-color: var(--line);
+}
+
+::selection {
+  background: rgba(201, 107, 44, 0.22);
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.5);
+  outline-offset: 2px;
+}
+
+.grain-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 250, 241, 0.94)),
+    radial-gradient(circle at top, rgba(201, 107, 44, 0.08), transparent 42%);
+  box-shadow:
+    0 24px 80px rgba(37, 28, 18, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.ink-card {
+  background: rgba(255, 252, 247, 0.82);
+  box-shadow:
+    0 14px 40px rgba(18, 32, 43, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.app-shell {
+  position: relative;
+}
+
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.26;
   background-image:
-    radial-gradient(circle at top left, rgba(251, 191, 36, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.16), transparent 24%);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+    linear-gradient(rgba(18, 32, 43, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(18, 32, 43, 0.02) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
