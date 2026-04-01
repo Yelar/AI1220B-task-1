@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+from uuid import uuid4
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -47,26 +49,94 @@ def health():
 
 @app.websocket("/ws/documents/{document_id}")
 async def document_socket(websocket: WebSocket, document_id: str):
-    await manager.connect(document_id, websocket)
+    user_id = websocket.query_params.get("userId", "anonymous")
+    user_name = websocket.query_params.get("userName", "Anonymous")
+    client_id = websocket.query_params.get("clientId", str(uuid4()))
+
+    presence = await manager.connect(
+        document_id,
+        websocket,
+        user_id=user_id,
+        user_name=user_name,
+        client_id=client_id,
+    )
+    await manager.send_to_client(
+        websocket,
+        {
+            "type": "connection:ack",
+            "documentId": document_id,
+            "clientId": client_id,
+            "presence": {
+                "userId": presence.user_id,
+                "userName": presence.user_name,
+                "clientId": presence.client_id,
+            },
+            "participants": manager.get_room_presence(document_id),
+        },
+    )
     await manager.broadcast(
         document_id,
-        {"type": "presence", "message": f"Client joined document {document_id}."},
+        {
+            "type": "presence:sync",
+            "documentId": document_id,
+            "participants": manager.get_room_presence(document_id),
+        },
     )
 
     try:
         while True:
             payload = await websocket.receive_json()
-            await manager.broadcast(
-                document_id,
+            message_type = payload.get("type")
+
+            if message_type == "presence:update":
+                manager.update_presence(
+                    document_id,
+                    client_id,
+                    cursor=payload.get("cursor"),
+                    selection=payload.get("selection"),
+                )
+                await manager.broadcast(
+                    document_id,
+                    {
+                        "type": "presence:sync",
+                        "documentId": document_id,
+                        "participants": manager.get_room_presence(document_id),
+                    },
+                )
+                continue
+
+            if message_type == "document:update":
+                await manager.broadcast(
+                    document_id,
+                    {
+                        "type": "document:update",
+                        "documentId": document_id,
+                        "sender": {
+                            "userId": user_id,
+                            "userName": user_name,
+                            "clientId": client_id,
+                        },
+                        "payload": payload.get("payload", {}),
+                    },
+                    exclude_client_id=client_id,
+                )
+                continue
+
+            await manager.send_to_client(
+                websocket,
                 {
-                    "type": payload.get("type", "update"),
+                    "type": "error",
                     "documentId": document_id,
-                    "payload": payload,
+                    "message": "Unsupported WebSocket message type.",
                 },
             )
     except WebSocketDisconnect:
-        manager.disconnect(document_id, websocket)
+        manager.disconnect(document_id, client_id)
         await manager.broadcast(
             document_id,
-            {"type": "presence", "message": f"Client left document {document_id}."},
+            {
+                "type": "presence:sync",
+                "documentId": document_id,
+                "participants": manager.get_room_presence(document_id),
+            },
         )

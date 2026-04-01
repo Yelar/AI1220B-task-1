@@ -36,3 +36,21 @@ If you want to test the backend without LM Studio first, set `LLM_MOCK=true`.
 - `document_id`
 - `feature`
 - `limit`
+
+## WebSocket collaboration
+
+Connect to:
+
+- `ws://127.0.0.1:8000/ws/documents/{documentId}?userId=u1&userName=Alice`
+
+Supported message types:
+
+- `presence:update`
+- `document:update`
+
+Server events:
+
+- `connection:ack`
+- `presence:sync`
+- `document:update`
+- `error`
