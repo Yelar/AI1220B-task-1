@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -23,7 +23,6 @@ def ensure_database_directory(database_url: str) -> None:
 
 ensure_database_directory(settings.database_url)
 
-
 engine = create_engine(
     settings.database_url,
     connect_args=_sqlite_connect_args(settings.database_url),
@@ -41,3 +40,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def seed_demo_users() -> None:
+    from app.models import User
+
+    demo_users = [
+        {"email": "owner@example.com", "name": "Owner Demo"},
+        {"email": "editor@example.com", "name": "Editor Demo"},
+        {"email": "commenter@example.com", "name": "Commenter Demo"},
+        {"email": "viewer@example.com", "name": "Viewer Demo"},
+    ]
+
+    with SessionLocal() as db:
+        existing = db.scalars(select(User)).first()
+        if existing is not None:
+            return
+
+        for user in demo_users:
+            db.add(User(**user))
+        db.commit()

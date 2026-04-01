@@ -4,6 +4,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+RoleValue = Literal["owner", "editor", "commenter", "viewer"]
+
+
+class UserRead(BaseModel):
+    id: int
+    email: str
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class DocumentBase(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     content: str = ""
@@ -28,12 +39,30 @@ class DocumentRead(DocumentBase):
     model_config = {"from_attributes": True}
 
 
+class DocumentVersionCreate(BaseModel):
+    label: str | None = Field(default=None, max_length=200)
+
+
 class DocumentVersionRead(BaseModel):
     id: int
     document_id: int
     label: str | None
     content: str
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentPermissionCreate(BaseModel):
+    user_id: int
+    role: RoleValue
+
+
+class DocumentPermissionRead(BaseModel):
+    id: int
+    document_id: int
+    user_id: int
+    role: RoleValue
 
     model_config = {"from_attributes": True}
 
