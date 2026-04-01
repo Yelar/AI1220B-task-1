@@ -14,6 +14,10 @@
   --warn-text: #b45309;
   --error-bg: #fde7ef;
   --error-text: #be185d;
+  --font-display:
+    "Avenir Next", "Avenir", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 @theme inline {
