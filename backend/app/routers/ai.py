@@ -15,13 +15,13 @@ async def invoke_ai(payload: AIInvokeRequest, db: Session = Depends(get_db)):
     if payload.document_id is not None and db.get(Document, payload.document_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
 
-    prompt, output_text, model_name = await generate_ai_suggestion(payload)
+    result = await generate_ai_suggestion(payload)
     interaction = AIInteraction(
         document_id=payload.document_id,
         feature=payload.feature,
-        prompt_excerpt=prompt,
-        response_text=output_text,
-        model_name=model_name,
+        prompt_excerpt=result.prompt,
+        response_text=result.output_text,
+        model_name=result.model_name,
         status="completed",
     )
     db.add(interaction)
@@ -29,8 +29,10 @@ async def invoke_ai(payload: AIInvokeRequest, db: Session = Depends(get_db)):
 
     return AIInvokeResponse(
         feature=payload.feature,
-        output_text=output_text,
-        model_name=model_name,
+        output_text=result.output_text,
+        model_name=result.model_name,
+        provider=result.provider,
+        mocked=result.mocked,
     )
 
 
