@@ -19,7 +19,7 @@ import {
   updateDocument,
 } from "@/app/lib/api";
 import { WS_BASE_URL } from "@/app/lib/config";
-import { formatTimestamp, readStoredRole, writeStoredRole } from "@/app/lib/ui";
+import { formatTimestamp, getExcerpt, readStoredRole, writeStoredRole } from "@/app/lib/ui";
 import {
   canCreateVersions,
   canEdit,
@@ -91,6 +91,55 @@ function connectionLabel(status: ConnectionStatus) {
     default:
       return "Connecting";
   }
+}
+
+function AppLogo({ compact = false }: { compact?: boolean }) {
+  return (
+    <div
+      className={`flex items-center justify-center rounded-2xl border border-black/8 bg-white text-black shadow-[0_10px_18px_rgba(15,23,42,0.08)] ${
+        compact ? "h-10 w-10" : "h-11 w-11"
+      }`}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true" className={compact ? "h-5 w-5" : "h-6 w-6"}>
+        <path d="M6 2h8l4 4v16H6V2Zm8 1.8V7h3.2L14 3.8ZM8.5 10h7v1.4h-7V10Zm0 3.3h7v1.4h-7v-1.4Zm0 3.3h5v1.4h-5v-1.4Z" fill="currentColor" />
+      </svg>
+    </div>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <path
+        d="m14.5 6.5-5 5 5 5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function outlineFromContent(content: string) {
+  const headingLines = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => /^#+\s/.test(line) || /^[A-Z][A-Za-z0-9 ,:&/-]{3,}$/.test(line))
+    .map((line) => line.replace(/^#+\s*/, ""));
+
+  if (headingLines.length > 0) {
+    return headingLines.slice(0, 6);
+  }
+
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((line, index) => (index === 0 ? "Introduction" : getExcerpt(line, 36)));
 }
 
 export default function DocumentEditor({ documentId }: { documentId: number }) {
@@ -529,11 +578,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
 
     if (selectionEnd > selectionStart) {
-      setContent((current) => {
-        const nextContent =
-          current.slice(0, selectionStart) + aiResult + current.slice(selectionEnd);
-        return nextContent;
-      });
+      setContent((current) => current.slice(0, selectionStart) + aiResult + current.slice(selectionEnd));
       setSelectionEnd(selectionStart + aiResult.length);
     } else {
       setContent((current) => `${current.trimEnd()}\n\n${aiResult}`);
@@ -549,10 +594,19 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
   }
 
+  const outline = outlineFromContent(content);
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+  const pageEstimate = Math.max(1, Math.ceil(Math.max(wordCount, 1) / 420));
+  const lastUpdated = document ? formatTimestamp(document.updated_at) : "Unavailable";
+  const saveStateLabel = saving ? "Saving..." : dirty ? "Unsaved changes" : "All changes saved";
+  const selectedTextPreview = selectedText.trim()
+    ? getExcerpt(selectedText.trim(), 110)
+    : "Highlight text in the page to send it to the AI panel.";
+
   if (loading) {
     return (
-      <main className="app-shell flex-1 px-4 py-6 sm:px-6 lg:px-10">
-        <div className="mx-auto w-full max-w-7xl rounded-[2rem] border border-black/10 bg-white/70 px-6 py-12 text-center text-sm text-slate-600 shadow-[0_20px_80px_rgba(15,23,42,0.08)]">
+      <main className="app-shell min-h-screen flex-1 bg-[#f1f3f4] px-4 py-8 sm:px-6">
+        <div className="mx-auto w-full max-w-5xl rounded-[2rem] bg-white px-6 py-12 text-center text-sm text-slate-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
           Loading document workspace...
         </div>
       </main>
@@ -561,15 +615,16 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
   if (error && !document) {
     return (
-      <main className="app-shell flex-1 px-4 py-6 sm:px-6 lg:px-10">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-[2rem] border border-red-200 bg-white/80 p-8 text-red-700 shadow-[0_20px_80px_rgba(15,23,42,0.08)]">
-          <p className="text-xs uppercase tracking-[0.24em] text-red-500">Document error</p>
-          <h1 className="text-3xl font-semibold text-slate-950">This editor could not load.</h1>
-          <p className="text-sm leading-7">{error}</p>
+      <main className="app-shell min-h-screen flex-1 bg-[#f1f3f4] px-4 py-8 sm:px-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-[2rem] bg-white p-8 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+          <p className="section-label text-red-500">Document error</p>
+          <h1 className="text-3xl font-semibold text-slate-950">This document could not load.</h1>
+          <p className="text-sm leading-7 text-red-700">{error}</p>
           <Link
             href="/"
-            className="inline-flex w-fit rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white"
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-[#1a73e8] px-5 py-3 text-sm font-semibold text-white"
           >
+            <ArrowLeftIcon />
             Back to dashboard
           </Link>
         </div>
@@ -578,345 +633,384 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   }
 
   return (
-    <main className="app-shell flex-1 px-4 py-6 sm:px-6 lg:px-10">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="grain-panel rounded-[2rem] border border-black/10 p-6 sm:p-8">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-3">
+    <main className="app-shell min-h-screen flex-1 bg-[#f1f3f4]">
+      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
               <Link
                 href="/"
-                className="pill"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100"
               >
-                Back to dashboard
+                <ArrowLeftIcon />
               </Link>
-              <div>
-                <p className="section-label">Document #{document?.id}</p>
-                <h1 className="mt-2 text-3xl font-semibold text-slate-950 sm:text-5xl">
-                  {title || document?.title || "Untitled draft"}
-                </h1>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
-                  Edit the draft, review AI output, and monitor the local collaboration room from
-                  one screen.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[29rem]">
-              <div className="metric">
-                <p className="section-label">Connection</p>
-                <p className="mt-3 text-xl font-semibold text-slate-950">
-                  {connectionLabel(connectionStatus)}
-                </p>
-              </div>
-              <div className="metric">
-                <p className="section-label">Presence</p>
-                <p className="mt-3 text-xl font-semibold text-slate-950">{presence.length}</p>
-              </div>
-              <div className="metric">
-                <p className="section-label">Last updated</p>
-                <p className="mt-3 text-sm font-medium text-slate-900">
-                  {document ? formatTimestamp(document.updated_at) : "Unavailable"}
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
-          <div className="space-y-6">
-            <form
-              onSubmit={handleSaveDocument}
-              className="ink-card rounded-[1.75rem] border border-black/10 p-6"
-            >
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="section-label">Editor</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Draft</h2>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="submit"
-                    disabled={!canEdit(role) || saving || !dirty}
-                    className="button-primary"
-                  >
-                    {saving ? "Saving..." : dirty ? "Save document" : "Saved"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canCreateVersions(role) || saving}
-                    onClick={handleCreateVersion}
-                    className="button-secondary"
-                  >
-                    Save version snapshot
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-4">
+              <AppLogo />
+              <div className="min-w-0">
                 <input
                   value={title}
                   onChange={handleTitleChange}
                   disabled={!canEdit(role)}
-                  className="field text-2xl font-semibold disabled:bg-slate-100"
+                  className="w-full min-w-0 bg-transparent text-[1.7rem] font-semibold tracking-tight text-slate-900 outline-none disabled:text-slate-900"
                 />
-
-                <textarea
-                  ref={editorRef}
-                  value={content}
-                  onChange={handleContentChange}
-                  onSelect={(event) => syncSelection(event.currentTarget)}
-                  disabled={!canEdit(role)}
-                  rows={20}
-                  className="field-area min-h-[28rem] disabled:bg-slate-100"
-                />
-              </div>
-
-              <div className="mt-5 flex flex-col gap-3 text-sm">
-                {!canEdit(role) ? (
-                  <div className="notice notice-warn">
-                    {role === "commenter"
-                      ? "Commenter mode is read-only for now. You can review text, versions, and AI history."
-                      : "Viewer mode is read-only. Editing and AI actions are intentionally disabled."}
-                  </div>
-                ) : null}
-
-                {remoteDraftNotice ? (
-                  <div className="notice notice-info">{remoteDraftNotice}</div>
-                ) : null}
-
-                {saveMessage ? <div className="notice notice-success">{saveMessage}</div> : null}
-
-                {error ? <div className="notice notice-error">{error}</div> : null}
-              </div>
-            </form>
-
-            <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="section-label">AI panel</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Suggestion review</h2>
-                </div>
-                <div className="pill">
-                  Selection length: {selectedText.length}
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <span>{saveStateLabel}</span>
+                  <span>•</span>
+                  <span>{lastUpdated}</span>
+                  <span>•</span>
+                  <span>SQLite workspace</span>
                 </div>
               </div>
+            </div>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="space-y-4">
-                  <select
-                    value={aiFeature}
-                    onChange={(event) => setAiFeature(event.target.value as AIFeature)}
-                    className="field-select"
-                  >
-                    {aiFeatures.map((feature) => (
-                      <option key={feature.value} value={feature.value}>
-                        {feature.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    value={targetLanguage}
-                    onChange={(event) => setTargetLanguage(event.target.value)}
-                    disabled={aiFeature !== "translate"}
-                    placeholder="Target language"
-                    className="field disabled:bg-slate-100"
-                  />
-
-                  <div className="panel p-4">
-                    <p className="section-label">Selected text</p>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
-                      {selectedText || "Select text inside the editor to prepare an AI request."}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleInvokeAi}
-                    disabled={!canUseAi(role) || aiBusy}
-                    className="button-primary w-full"
-                  >
-                    {aiBusy ? "Requesting suggestion..." : "Run AI suggestion"}
-                  </button>
-
-                  {!canUseAi(role) ? (
-                    <div className="notice notice-warn">
-                      AI is disabled for {role} mode. The assignment report expects a clear message
-                      instead of a silent failure, so the frontend explains the restriction here.
-                    </div>
-                  ) : null}
-
-                  {aiError ? <div className="notice notice-error">{aiError}</div> : null}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-[1.5rem] border border-black/10 bg-slate-950 p-4 text-slate-100 shadow-[0_10px_28px_rgba(15,23,42,0.15)]">
-                    <p className="section-label text-slate-400">Suggestion result</p>
-                    <p className="mt-3 min-h-48 whitespace-pre-wrap text-sm leading-7 text-slate-200">
-                      {aiResult || "AI output will appear here for review before you apply it."}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleApplySuggestion}
-                    disabled={!aiResult || !canEdit(role)}
-                    className="button-secondary w-full"
-                  >
-                    Apply suggestion to draft
-                  </button>
-                </div>
-              </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="pill border-0 bg-[rgba(31,122,224,0.09)] text-[#1f4aa8]">Role {role}</span>
+              <span className="pill border-0 bg-[rgba(107,92,255,0.1)] text-[#4b3dd1]">
+                {connectionLabel(connectionStatus)}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleSaveDocument()}
+                disabled={!canEdit(role) || saving || !dirty}
+                className="button-primary h-11 rounded-full px-5"
+              >
+                {saving ? "Saving..." : dirty ? "Save" : "Saved"}
+              </button>
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
-              <RolePicker value={role} onChange={setRole} label="Demo role" />
-
-              <div className="panel-muted mt-6 p-4 text-sm leading-7 text-slate-700">
-                Role changes here are frontend-only for the demo until backend permissions are
-                implemented.
-              </div>
-            </div>
-
-            <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="section-label">Realtime</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Room status</h2>
-                </div>
-                <span className="pill">
-                  {connectionLabel(connectionStatus)}
-                </span>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {presence.map((person) => (
-                  <div
-                    key={person.id}
-                    className="panel flex items-center justify-between px-4 py-3 text-sm text-slate-700"
-                  >
-                    <span>{person.label}</span>
-                    <span className="pill">
-                      {person.role}
-                    </span>
-                  </div>
-                ))}
-
-                {presence.length === 0 ? (
-                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
-                    No active collaborators detected yet. Open this document in a second tab to test
-                    presence and reconnecting.
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {activity.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      item.tone === "accent"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : item.tone === "warn"
-                          ? "border-amber-200 bg-amber-50 text-amber-800"
-                          : "border-black/10 bg-white/70 text-slate-700"
-                    }`}
-                  >
-                    <div>{item.message}</div>
-                    <div className="mt-2 text-[11px] uppercase tracking-[0.24em] opacity-70">
-                      {formatTimestamp(item.createdAt)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
-              <div>
-                <p className="section-label">Versions</p>
-                <h2 className="mt-2 text-3xl font-semibold text-slate-950">Version snapshots</h2>
-              </div>
-
-              <div className="mt-5 flex gap-3">
-                <input
-                  value={versionLabel}
-                  onChange={(event) => setVersionLabel(event.target.value)}
-                  placeholder="Before AI rewrite"
-                  disabled={!canCreateVersions(role)}
-                  className="field disabled:bg-slate-100"
-                />
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {versions.map((version) => (
-                  <div
-                    key={version.id}
-                    className="rounded-2xl border border-black/10 bg-white/70 px-4 py-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">
-                          {version.label || "Untitled snapshot"}
-                        </p>
-                        <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">
-                          {formatTimestamp(version.created_at)}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled
-                        className="rounded-2xl border border-black/10 bg-slate-100 px-4 py-2 text-sm text-slate-500"
-                      >
-                        Revert pending backend support
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {versions.length === 0 ? (
-                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
-                    No saved versions yet. Owners can create snapshots from the editor toolbar.
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
-              <div>
-                <p className="section-label">AI history</p>
-                <h2 className="mt-2 text-3xl font-semibold text-slate-950">Recent suggestions</h2>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {history.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-black/10 bg-white/70 px-4 py-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="rounded-full bg-slate-950 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white">
-                        {item.feature}
-                      </span>
-                      <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                        {formatTimestamp(item.created_at)}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-7 text-slate-700">{item.response_text}</p>
-                  </div>
-                ))}
-
-                {history.length === 0 ? (
-                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
-                    AI history will populate here after the first successful request for this
-                    document.
-                  </div>
-                ) : null}
-              </div>
-            </div>
+          <div className="flex flex-wrap items-center gap-3 rounded-[1.6rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.08),rgba(107,92,255,0.08),rgba(217,70,239,0.06))] px-4 py-3">
+            <span className="pill border-0 bg-white text-slate-700">{wordCount} words</span>
+            <span className="pill border-0 bg-white text-slate-700">{pageEstimate} page estimate</span>
+            <span className="pill border-0 bg-white text-slate-700">{selectedText.length} selected</span>
+            <span className="pill border-0 bg-white text-slate-700">Versions {versions.length}</span>
+            <span className="pill border-0 bg-white text-slate-700">AI history {history.length}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="mx-auto grid w-full max-w-[1800px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[250px,minmax(0,1fr),360px] lg:px-8">
+        <aside className="space-y-5">
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <div className="flex items-center justify-between">
+              <p className="text-lg font-semibold text-slate-900">Document tabs</p>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-black hover:bg-slate-100"
+              >
+                +
+              </button>
+            </div>
+            <div className="mt-4 rounded-[1.2rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.12),rgba(107,92,255,0.1),rgba(217,70,239,0.08))] p-3">
+              <div className="flex items-center gap-3">
+                <AppLogo compact />
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-900">
+                    {title || "Untitled document"}
+                  </div>
+                  <div className="text-xs text-slate-600">Active tab</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <div className="flex items-center justify-between">
+              <p className="text-lg font-semibold text-slate-900">Outline</p>
+              <span className="text-xs uppercase tracking-[0.24em] text-slate-400">Live</span>
+            </div>
+            <div className="mt-4 space-y-2">
+              {outline.length > 0 ? (
+                outline.map((item, index) => (
+                  <div key={`${item}-${index}`} className="rounded-2xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                    {item}
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm leading-6 text-slate-500">
+                  Add headings or paragraph text and the outline will appear here.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <p className="text-lg font-semibold text-slate-900">Document stats</p>
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Words</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{wordCount}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Pages</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{pageEstimate}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Selection</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{selectedText.length}</div>
+              </div>
+            </div>
+          </section>
+        </aside>
+
+        <section className="min-w-0">
+          <div className="space-y-4">
+            {!canEdit(role) ? (
+              <div className="notice notice-warn">
+                {role === "commenter"
+                  ? "Commenter mode is read-only for now. You can review the document, version history, and AI output."
+                  : "Viewer mode is read-only. Editing and AI actions are intentionally disabled."}
+              </div>
+            ) : null}
+
+            {remoteDraftNotice ? <div className="notice notice-info">{remoteDraftNotice}</div> : null}
+            {saveMessage ? <div className="notice notice-success">{saveMessage}</div> : null}
+            {error ? <div className="notice notice-error">{error}</div> : null}
+          </div>
+
+          <form onSubmit={handleSaveDocument} className="mt-4 rounded-[2rem] bg-[linear-gradient(180deg,#eef3ff,#f4f0ff)] p-4 sm:p-6">
+            <div className="mx-auto mb-3 flex w-full max-w-[880px] items-center justify-between px-3 text-xs uppercase tracking-[0.24em] text-slate-400">
+              <span>Page 1</span>
+              <span>{pageEstimate} page estimate</span>
+            </div>
+
+            <div className="mx-auto w-full max-w-[880px] rounded-[0.35rem] bg-white px-10 py-12 shadow-[0_20px_44px_rgba(15,23,42,0.12)] sm:px-14 sm:py-14">
+              <textarea
+                ref={editorRef}
+                value={content}
+                onChange={handleContentChange}
+                onSelect={(event) => syncSelection(event.currentTarget)}
+                disabled={!canEdit(role)}
+                rows={26}
+                className="min-h-[68vh] w-full resize-none border-0 bg-transparent text-[1.08rem] leading-[2.1rem] text-slate-800 outline-none disabled:text-slate-700"
+                placeholder="Start writing here. Select text to rewrite, summarize, translate, or restructure it from the AI panel."
+              />
+            </div>
+          </form>
         </section>
+
+        <aside className="space-y-5">
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-lg font-semibold text-slate-900">Collaboration</p>
+                <p className="mt-1 text-sm text-slate-500">Role, presence, and connection state</p>
+              </div>
+              <span className="pill border-0 bg-[rgba(31,122,224,0.1)] text-[#1f4aa8]">
+                {connectionLabel(connectionStatus)}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Presence</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">{presence.length}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Updated</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">{lastUpdated}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Doc id</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">#{document?.id}</div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[1.4rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.05),rgba(107,92,255,0.05),rgba(217,70,239,0.04))] p-4">
+              <RolePicker value={role} onChange={setRole} label="Demo role" />
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {presence.map((person) => (
+                <div
+                  key={person.id}
+                  className="flex items-center justify-between rounded-2xl border border-slate-200 px-3 py-3"
+                >
+                  <div>
+                    <div className="text-sm font-medium text-slate-900">{person.label}</div>
+                    <div className="text-xs text-slate-500">Live in the room</div>
+                  </div>
+                  <span className="pill border-0 bg-slate-100 text-slate-700">{person.role}</span>
+                </div>
+              ))}
+              {presence.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  Waiting for presence updates from the collaboration room.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-slate-900">AI assistant</p>
+                <p className="mt-1 text-sm text-slate-500">Run an action on the selected text</p>
+              </div>
+              <div className="rounded-full bg-[linear-gradient(135deg,rgba(31,122,224,0.12),rgba(107,92,255,0.12),rgba(217,70,239,0.08))] p-1.5">
+                <AppLogo compact />
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[1.4rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.08),rgba(107,92,255,0.08),rgba(217,70,239,0.06))] p-4">
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Selected text</div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{selectedTextPreview}</p>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <select
+                value={aiFeature}
+                onChange={(event) => setAiFeature(event.target.value as AIFeature)}
+                disabled={!canUseAi(role)}
+                className="field-select"
+              >
+                {aiFeatures.map((feature) => (
+                  <option key={feature.value} value={feature.value}>
+                    {feature.label}
+                  </option>
+                ))}
+              </select>
+
+              {aiFeature === "translate" ? (
+                <input
+                  value={targetLanguage}
+                  onChange={(event) => setTargetLanguage(event.target.value)}
+                  disabled={!canUseAi(role)}
+                  className="field"
+                  placeholder="Target language"
+                />
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => void handleInvokeAi()}
+                disabled={!canUseAi(role) || aiBusy}
+                className="button-primary h-12 w-full rounded-full"
+              >
+                {aiBusy ? "Running..." : `Run ${aiFeatures.find((item) => item.value === aiFeature)?.label}`}
+              </button>
+
+              {!canUseAi(role) ? (
+                <div className="notice notice-warn">
+                  AI actions are available only for owner and editor roles in the frontend demo.
+                </div>
+              ) : null}
+              {aiError ? <div className="notice notice-error">{aiError}</div> : null}
+            </div>
+
+            <div className="mt-4 rounded-[1.4rem] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,246,255,0.98))] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-900">Suggestion</p>
+                <button
+                  type="button"
+                  onClick={handleApplySuggestion}
+                  disabled={!aiResult || !canEdit(role)}
+                  className="button-secondary rounded-full px-4 py-2"
+                >
+                  Apply
+                </button>
+              </div>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                {aiResult || "AI output will appear here after you run an action."}
+              </p>
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-slate-900">Versions</p>
+                <p className="mt-1 text-sm text-slate-500">Save checkpoints before major changes</p>
+              </div>
+              <span className="pill border-0 bg-slate-100 text-slate-700">{versions.length}</span>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <input
+                value={versionLabel}
+                onChange={(event) => setVersionLabel(event.target.value)}
+                placeholder="Before AI rewrite"
+                disabled={!canCreateVersions(role)}
+                className="field"
+              />
+              <button
+                type="button"
+                disabled={!canCreateVersions(role) || saving}
+                onClick={() => void handleCreateVersion()}
+                className="button-secondary h-12 w-full rounded-full"
+              >
+                Save version snapshot
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {versions.slice(0, 4).map((version) => (
+                <div key={version.id} className="rounded-2xl border border-slate-200 px-4 py-3">
+                  <div className="text-sm font-medium text-slate-900">
+                    {version.label || `Version ${version.id}`}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{formatTimestamp(version.created_at)}</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {getExcerpt(version.content, 90)}
+                  </p>
+                </div>
+              ))}
+              {versions.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  No snapshots yet. Create one before a big rewrite or AI pass.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <p className="text-lg font-semibold text-slate-900">Recent suggestions</p>
+            <div className="mt-4 space-y-3">
+              {history.slice(0, 4).map((item) => (
+                <div key={item.id} className="rounded-2xl border border-slate-200 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="pill border-0 bg-[#e8f0fe] text-[#174ea6]">{item.feature}</span>
+                    <span className="text-xs text-slate-500">{formatTimestamp(item.created_at)}</span>
+                  </div>
+                  <div className="mt-2 text-sm font-medium text-slate-900">{item.status}</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {getExcerpt(item.response_text, 100)}
+                  </p>
+                </div>
+              ))}
+              {history.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  AI history for this document will appear after the first request.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+            <p className="text-lg font-semibold text-slate-900">Activity</p>
+            <div className="mt-4 space-y-3">
+              {activity.map((item) => (
+                <div
+                  key={item.id}
+                  className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
+                    item.tone === "accent"
+                      ? "bg-[#e8f0fe] text-[#174ea6]"
+                      : item.tone === "warn"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  <div className="font-medium">{item.message}</div>
+                  <div className="mt-1 text-xs opacity-80">{formatTimestamp(item.createdAt)}</div>
+                </div>
+              ))}
+              {activity.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  Collaboration activity will show here as clients join, edit, or trigger AI.
+                </p>
+              ) : null}
+            </div>
+          </section>
+        </aside>
       </div>
     </main>
   );

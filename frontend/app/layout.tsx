@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import "./globals.css";
 
-const displayFont = Space_Grotesk({
+const displayFont = Manrope({
   variable: "--font-display",
   subsets: ["latin"],
 });
@@ -15,7 +15,7 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Atlas Draftboard",
+  title: "Atlas Docs",
   description: "Collaborative document dashboard and editor for the AI1220B proof of concept.",
 };
 
