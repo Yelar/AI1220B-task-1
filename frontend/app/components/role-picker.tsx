@@ -21,9 +21,7 @@ export default function RolePicker({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <label className="section-label">{label}</label>
-        <span className="pill">
-          {selectedRole.label}
-        </span>
+        <span className="pill">{selectedRole.label}</span>
       </div>
       <select
         value={value}
@@ -36,7 +34,7 @@ export default function RolePicker({
           </option>
         ))}
       </select>
-      <p className="text-sm leading-6 text-slate-600">{selectedRole.description}</p>
+      <p className="text-[0.92rem] leading-6 text-slate-600">{selectedRole.description}</p>
     </div>
   );
 }

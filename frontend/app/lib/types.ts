@@ -50,7 +50,7 @@ export const roleOptions: Array<{
   {
     value: "owner",
     label: "Owner",
-    description: "Can edit, use AI, save versions, and lead the demo flow.",
+    description: "Can edit the document, save changes, and use AI suggestions.",
   },
   {
     value: "editor",
@@ -60,12 +60,12 @@ export const roleOptions: Array<{
   {
     value: "commenter",
     label: "Commenter",
-    description: "Read-only in this PoC, with visibility into activity and AI history.",
+    description: "Read-only in this proof of concept, with visibility into connection status and AI output.",
   },
   {
     value: "viewer",
     label: "Viewer",
-    description: "Read-only mode for demos and evaluator walkthroughs.",
+    description: "Read-only mode for walkthroughs and evaluation.",
   },
 ];
 

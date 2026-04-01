@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f7fb;
-  --foreground: #171923;
-  --muted: #657084;
-  --line: #d8deeb;
-  --blue: #2563eb;
-  --blue-strong: #1e40af;
-  --blue-soft: #e8efff;
-  --success-bg: #e7f7f1;
-  --success-text: #0f766e;
-  --warn-bg: #fff4df;
-  --warn-text: #b45309;
-  --error-bg: #fde7ef;
-  --error-text: #be185d;
+  --background: #f4f1ea;
+  --foreground: #1b2430;
+  --muted: #667283;
+  --line: #d9d5cc;
+  --blue: #315e8a;
+  --blue-strong: #23496b;
+  --blue-soft: #e7eef5;
+  --success-bg: #ebf5ef;
+  --success-text: #2d6a4f;
+  --warn-bg: #fdf2df;
+  --warn-text: #9c5b16;
+  --error-bg: #f9e8e4;
+  --error-text: #9f3d2b;
   --font-display:
     "Avenir Next", "Avenir", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-mono:
@@ -33,10 +33,9 @@ html {
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.09), transparent 28%),
-    radial-gradient(circle at top right, rgba(139, 92, 246, 0.08), transparent 24%),
-    radial-gradient(circle at bottom right, rgba(236, 72, 153, 0.06), transparent 22%),
-    linear-gradient(180deg, #f8f9fe, #f2f5fc);
+    radial-gradient(circle at top left, rgba(49, 94, 138, 0.05), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(108, 133, 163, 0.05), transparent 20%),
+    linear-gradient(180deg, #f7f4ee, #f3f0e8);
   color: var(--foreground);
   font-family: var(--font-display), Arial, sans-serif;
 }
@@ -46,7 +45,7 @@ body {
 }
 
 ::selection {
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(49, 94, 138, 0.16);
 }
 
 a,
@@ -67,12 +66,34 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 a:focus-visible {
-  outline: 2px solid rgba(99, 102, 241, 0.35);
+  outline: 2px solid rgba(49, 94, 138, 0.28);
   outline-offset: 2px;
 }
 
 .app-shell {
   position: relative;
+}
+
+.surface-card {
+  background: rgba(255, 253, 249, 0.9);
+  box-shadow:
+    0 14px 32px rgba(24, 38, 52, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.soft-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.92), rgba(251, 248, 242, 0.94)),
+    radial-gradient(circle at top right, rgba(49, 94, 138, 0.05), transparent 34%);
+  box-shadow:
+    0 12px 30px rgba(24, 38, 52, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.canvas-panel {
+  background:
+    linear-gradient(180deg, rgba(245, 241, 233, 0.88), rgba(240, 236, 228, 0.9)),
+    radial-gradient(circle at top, rgba(49, 94, 138, 0.05), transparent 28%);
 }
 
 .section-label {
@@ -87,8 +108,8 @@ a:focus-visible {
 .field-area,
 .field-select {
   width: 100%;
-  border: 1px solid var(--line);
-  background: white;
+  border: 1px solid rgba(27, 36, 48, 0.1);
+  background: rgba(255, 255, 255, 0.92);
   color: var(--foreground);
 }
 
@@ -110,15 +131,20 @@ a:focus-visible {
 .field:hover,
 .field-area:hover,
 .field-select:hover {
-  border-color: #c4cce0;
+  border-color: rgba(49, 94, 138, 0.22);
 }
 
 .field:focus,
 .field-area:focus,
 .field-select:focus {
-  border-color: rgba(99, 102, 241, 0.48);
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+  border-color: rgba(49, 94, 138, 0.35);
+  box-shadow: 0 0 0 4px rgba(49, 94, 138, 0.08);
   outline: none;
+}
+
+.field::placeholder,
+.field-area::placeholder {
+  color: #7e8896;
 }
 
 .button-primary,
@@ -132,28 +158,28 @@ a:focus-visible {
 }
 
 .button-primary {
-  background: linear-gradient(135deg, #2563eb, #4f46e5, #db2777);
+  background: #1f2e3d;
   color: white;
-  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.22);
+  box-shadow: 0 10px 22px rgba(24, 38, 52, 0.18);
 }
 
 .button-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1d4ed8, #4338ca, #be185d);
+  background: #172432;
 }
 
 .button-secondary {
-  border: 1px solid var(--line);
-  background: white;
+  border: 1px solid rgba(27, 36, 48, 0.12);
+  background: rgba(255, 255, 255, 0.84);
   color: var(--foreground);
 }
 
 .button-secondary:hover:not(:disabled) {
-  background: #f8f9fa;
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .button-subtle {
   border: 1px solid transparent;
-  background: #f8f9fa;
+  background: rgba(255, 255, 255, 0.7);
   color: var(--foreground);
 }
 
@@ -171,11 +197,12 @@ a:focus-visible {
   justify-content: center;
   gap: 0.35rem;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(27, 36, 48, 0.1);
   padding: 0.5rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--foreground);
+  background: rgba(255, 255, 255, 0.74);
 }
 
 .notice {

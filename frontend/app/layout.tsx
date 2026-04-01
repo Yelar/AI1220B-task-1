@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Atlas Docs",
+  title: "Document Workspace",
   description: "Collaborative document dashboard and editor for the AI1220B proof of concept.",
 };
 

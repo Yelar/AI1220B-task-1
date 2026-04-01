@@ -23,32 +23,18 @@ import RolePicker from "./role-picker";
 function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`flex items-center justify-center rounded-2xl border border-black/8 bg-white shadow-[0_10px_20px_rgba(15,23,42,0.08)] ${
+      className={`flex items-center justify-center rounded-full bg-[#111111] shadow-[0_10px_20px_rgba(15,23,42,0.16)] ${
         compact ? "h-10 w-10" : "h-11 w-11"
       }`}
     >
       <svg
         viewBox="0 0 24 24"
         aria-hidden="true"
-        className={`${compact ? "h-5 w-5" : "h-6 w-6"} fill-black`}
+        className={`${compact ? "h-5 w-5" : "h-6 w-6"} fill-white`}
       >
-        <path d="M6 2h8l4 4v16H6V2Zm8 1.8V7h3.2L14 3.8ZM8.5 10h7v1.4h-7V10Zm0 3.3h7v1.4h-7v-1.4Zm0 3.3h5v1.4h-5v-1.4Z" />
+        <path d="M12 5.5 18.2 16H5.8L12 5.5Z" />
       </svg>
     </div>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
-      <path
-        d="M4 7h16M4 12h16M4 17h16"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
   );
 }
 
@@ -203,57 +189,45 @@ export default function DocumentDashboard() {
   }
 
   return (
-    <main className="app-shell min-h-screen flex-1 bg-[#f6f7fb]">
+    <main className="app-shell min-h-screen flex-1">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 rounded-[1.75rem] bg-white px-4 py-4 shadow-[0_8px_28px_rgba(15,23,42,0.06)] sm:px-6">
+        <header className="surface-card flex flex-col gap-4 rounded-[1.75rem] px-4 py-4 sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4">
-              <button
-                type="button"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100"
-                aria-label="Workspace menu"
-              >
-                <MenuIcon />
-              </button>
               <div className="flex items-center gap-4">
                 <AppLogo />
                 <div>
                   <div className="text-[2rem] font-semibold tracking-tight text-slate-900">
-                    Atlas Docs
+                    Document workspace
                   </div>
                   <div className="text-sm text-slate-500">
-                    Create, open, edit, and review collaborative drafts
+                    Create, find, and open shared drafts for the Assignment 1 proof of concept.
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 lg:min-w-[44rem] lg:flex-row lg:items-center lg:justify-end">
-              <div className="relative flex-1">
+            <div className="flex flex-col gap-3 lg:min-w-[42rem] lg:flex-row lg:items-center lg:justify-end">
+              <label className="field flex h-14 flex-1 items-center rounded-full border-0 bg-[#f2efe8] px-5 shadow-none focus-within:bg-white">
+                <span className="pointer-events-none shrink-0 text-slate-500">
+                  <SearchIcon />
+                </span>
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search recent documents"
-                  className="field h-14 rounded-full border-0 bg-[#eef2f7] pl-16 pr-5 text-base shadow-none focus:bg-white"
+                  className="h-full flex-1 bg-transparent pl-4 pr-1 text-base text-slate-700 outline-none placeholder:text-slate-400"
                 />
-                <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-500">
-                  <SearchIcon />
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="pill border-0 bg-[rgba(31,122,224,0.08)] text-[#1f4aa8]">
-                  {health ? "local workspace" : "connecting"}
-                </span>
-                <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#111111] text-lg font-semibold text-white">
-                  {role.slice(0, 1).toUpperCase()}
-                </span>
-              </div>
+              </label>
+              <span className="pill border-0 bg-[rgba(49,94,138,0.08)] px-4 text-[#315e8a]">
+                {health ? "Backend live" : "Connecting"}
+              </span>
             </div>
           </div>
         </header>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,420px),1fr]">
-          <section className="rounded-[2rem] bg-white p-6 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+          <section className="surface-card rounded-[2rem] p-6">
             <div className="space-y-2">
               <p className="section-label">Create document</p>
               <h1 className="text-[2rem] font-semibold tracking-tight text-slate-900">
@@ -277,7 +251,7 @@ export default function DocumentDashboard() {
                 onChange={(event) => setContent(event.target.value)}
                 placeholder="Paste assignment notes, project context, or a starting paragraph."
                 rows={10}
-                className="field-area"
+                className="field-area min-h-[16rem]"
               />
 
               <button
@@ -291,56 +265,50 @@ export default function DocumentDashboard() {
 
             {error ? <div className="notice notice-error mt-5">{error}</div> : null}
 
-            <div className="mt-5 rounded-[1.4rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.05),rgba(107,92,255,0.05),rgba(217,70,239,0.04))] p-4">
-              <RolePicker value={role} onChange={setRole} label="Demo role" />
+            <div className="mt-5 rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(244,241,234,0.72)] p-4">
+              <RolePicker value={role} onChange={setRole} label="Current role" />
             </div>
           </section>
 
-          <section className="rounded-[2rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.12),rgba(107,92,255,0.11),rgba(217,70,239,0.09))] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-            <div className="flex flex-col gap-4 border-b border-[#d5deeb] pb-5 md:flex-row md:items-start md:justify-between">
+          <section className="soft-panel rounded-[2rem] p-6">
+            <div className="flex flex-col gap-5 border-b border-[rgba(27,36,48,0.08)] pb-6 md:flex-row md:items-start md:justify-between">
               <div>
-                <p className="section-label">Assignment flow</p>
-                <h2 className="mt-2 text-[1.9rem] font-semibold tracking-tight text-slate-900">
-                  Keep the dashboard simple
+                <p className="section-label">Overview</p>
+                <h2 className="mt-2 max-w-2xl text-[2.1rem] font-semibold tracking-tight text-slate-900">
+                  Focused on the core document flow.
                 </h2>
-                <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
-                  This page focuses only on the required flow: create a document, open it,
-                  continue editing, and use the AI and collaboration panels inside the editor.
+                <p className="mt-3 max-w-2xl text-[0.98rem] leading-8 text-slate-600">
+                  Create a document here, open it, then continue editing with role-aware controls,
+                  AI suggestions, and live connection state inside the editor.
                 </p>
-              </div>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <span className="pill border-0 bg-white/80">
-                  {canUseAi(role) ? "AI ready" : "Viewer mode"}
-                </span>
               </div>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-[1.5rem] bg-white/88 p-5 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
                 <div className="section-label">Documents</div>
                 <div className="mt-3 text-3xl font-semibold text-slate-900">{documents.length}</div>
-                <p className="mt-2 text-sm text-slate-600">Stored in the local backend.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Existing drafts available from the local backend.
+                </p>
               </div>
-              <div className="rounded-[1.5rem] bg-white/88 p-5 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
-                <div className="section-label">Mode</div>
-                <div className="mt-3 text-3xl font-semibold text-slate-900">
-                  {canUseAi(role) ? "Edit" : "Review"}
+              <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
+                <div className="section-label">Status</div>
+                <div className="mt-3 text-3xl font-semibold capitalize text-slate-900">
+                  {health?.status ?? "checking"}
                 </div>
-                <p className="mt-2 text-sm text-slate-600">Role-aware UI stays visible in the editor.</p>
-              </div>
-              <div className="rounded-[1.5rem] bg-white/88 p-5 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
-                <div className="section-label">Backend</div>
-                <div className="mt-3 text-3xl font-semibold text-slate-900">
-                  {health?.status ?? "..." }
-                </div>
-                <p className="mt-2 text-sm text-slate-600">FastAPI + SQLite local setup.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {canUseAi(role)
+                    ? "The current role can edit the document and run AI suggestions."
+                    : "The current role is read-only in the editor preview."}
+                </p>
               </div>
             </div>
           </section>
         </section>
 
-        <section className="rounded-[2rem] bg-white px-5 py-6 shadow-[0_10px_28px_rgba(15,23,42,0.05)] sm:px-7">
-          <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 md:flex-row md:items-center md:justify-between">
+        <section className="surface-card rounded-[2rem] px-5 py-6 sm:px-7">
+          <div className="flex flex-col gap-4 border-b border-[rgba(27,36,48,0.08)] pb-5 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-[2rem] font-semibold tracking-tight text-slate-900">
                 Recent documents
@@ -384,11 +352,11 @@ export default function DocumentDashboard() {
                 <Link
                   key={document.id}
                   href={`/documents/${document.id}`}
-                  className="group overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
+                  className="group overflow-hidden rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.92)] transition hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
                 >
-                  <div className="bg-[#f8f9fa] px-5 py-5">
-                    <div className="mx-auto flex h-[19rem] w-full max-w-[14rem] flex-col rounded-lg border border-slate-200 bg-white px-4 py-4 shadow-[0_10px_22px_rgba(15,23,42,0.04)]">
-                      <div className="h-2.5 w-3/4 rounded-full bg-slate-800/90" />
+                  <div className="bg-[rgba(244,241,234,0.72)] px-5 py-5">
+                    <div className="mx-auto flex h-[18.4rem] w-full max-w-[14rem] flex-col rounded-lg border border-[rgba(27,36,48,0.08)] bg-white px-4 py-4 shadow-[0_12px_22px_rgba(15,23,42,0.05)]">
+                      <div className="h-2.5 w-3/4 rounded-full bg-[#22384d]" />
                       <div className="mt-4 space-y-2">
                         {(lines.length === 0 ? ["No content yet."] : lines).map((line, index) => (
                           <div
@@ -403,10 +371,10 @@ export default function DocumentDashboard() {
                   </div>
 
                   <div className="px-5 py-4">
-                    <div className="line-clamp-1 text-[1.35rem] font-semibold tracking-tight text-slate-900">
+                    <div className="line-clamp-1 text-[1.3rem] font-semibold tracking-tight text-slate-900">
                       {document.title}
                     </div>
-                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+                    <p className="mt-2 line-clamp-2 text-[0.94rem] leading-6 text-slate-600">
                       {getExcerpt(document.content, 100)}
                     </p>
                     <div className="mt-4 flex items-center justify-between text-sm text-slate-500">

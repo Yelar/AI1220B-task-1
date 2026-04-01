@@ -35,13 +35,6 @@ type PresenceActor = {
   role: UserRole;
 };
 
-type ActivityItem = {
-  id: string;
-  tone: "neutral" | "accent";
-  message: string;
-  createdAt: string;
-};
-
 type BroadcastPayload = {
   type: string;
   actor?: PresenceActor;
@@ -61,12 +54,12 @@ const aiFeatures: Array<{ value: AIFeature; label: string }> = [
 function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`flex items-center justify-center rounded-2xl border border-black/8 bg-white text-black shadow-[0_10px_18px_rgba(15,23,42,0.08)] ${
+      className={`flex items-center justify-center rounded-full bg-[#111111] text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] ${
         compact ? "h-10 w-10" : "h-11 w-11"
       }`}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true" className={compact ? "h-5 w-5" : "h-6 w-6"}>
-        <path d="M6 2h8l4 4v16H6V2Zm8 1.8V7h3.2L14 3.8ZM8.5 10h7v1.4h-7V10Zm0 3.3h7v1.4h-7v-1.4Zm0 3.3h5v1.4h-5v-1.4Z" fill="currentColor" />
+        <path d="M12 5.5 18.2 16H5.8L12 5.5Z" fill="currentColor" />
       </svg>
     </div>
   );
@@ -87,13 +80,18 @@ function ArrowLeftIcon() {
   );
 }
 
-function buildActivity(message: string, tone: ActivityItem["tone"] = "neutral"): ActivityItem {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    tone,
-    message,
-    createdAt: new Date().toISOString(),
-  };
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <path
+        d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
 }
 
 function getSelectionContext(content: string, start: number, end: number) {
@@ -135,9 +133,9 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [aiResult, setAiResult] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [presence, setPresence] = useState<PresenceActor[]>([]);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [draftSignal, setDraftSignal] = useState(0);
   const [remoteDraftNotice, setRemoteDraftNotice] = useState<string | null>(null);
 
@@ -157,10 +155,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     writeStoredRole(role);
   }, [role]);
 
-  function pushActivity(message: string, tone: ActivityItem["tone"] = "neutral") {
-    setActivity((current) => [buildActivity(message, tone), ...current].slice(0, 8));
-  }
-
   useEffect(() => {
     if (!Number.isFinite(documentId) || documentId <= 0) {
       setError("Invalid document id.");
@@ -172,7 +166,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setLoading(true);
       setError(null);
       setPresence([]);
-      setActivity([]);
       setAiResult("");
       setAiError(null);
 
@@ -210,7 +203,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     };
 
     if (parsed.type === "presence" && parsed.message) {
-      pushActivity(parsed.message);
       return;
     }
 
@@ -227,16 +219,10 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
           const others = current.filter((item) => item.id !== actor.id);
           return [actor, ...others];
         });
-        if (actor.id !== clientIdRef.current) {
-          pushActivity(`${actor.label} joined the room.`, "accent");
-        }
       }
 
       if (payload.message === "left") {
         setPresence((current) => current.filter((item) => item.id !== actor.id));
-        if (actor.id !== clientIdRef.current) {
-          pushActivity(`${actor.label} left the room.`);
-        }
       }
       return;
     }
@@ -251,7 +237,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         return;
       }
 
-      pushActivity(`${actor.label} sent a live update.`, "accent");
       if (!dirty) {
         setTitle(payload.title ?? "");
         setContent(payload.content ?? "");
@@ -272,7 +257,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
 
     if (payload.type === "ai-request" && actor && actor.id !== clientIdRef.current) {
-      pushActivity(`${actor.label} used the AI panel.`);
+      setRemoteDraftNotice(`${actor.label} is using the AI panel in this room.`);
     }
   });
 
@@ -428,7 +413,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setContent(savedDocument.content);
       setDirty(false);
       setSaveMessage(`Saved at ${formatTimestamp(savedDocument.updated_at)}.`);
-      pushActivity("Document changes saved.", "accent");
     } catch (requestError) {
       const message =
         requestError instanceof Error ? requestError.message : "Failed to save document.";
@@ -472,7 +456,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
       setAiResult(response.output_text);
       setSaveMessage("AI suggestion ready for review.");
-      pushActivity(`AI ${aiFeature} suggestion received.`, "accent");
     } catch (requestError) {
       const message =
         requestError instanceof ApiError
@@ -499,11 +482,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setDirty(true);
     setDraftSignal(Date.now());
     setSaveMessage("AI suggestion staged in the editor. Save when ready.");
-    pushActivity("AI suggestion applied to the local draft.", "accent");
 
     if (editorRef.current) {
       editorRef.current.focus();
     }
+  }
+
+  function openAiPanel() {
+    setAiPanelOpen(true);
   }
 
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
@@ -515,8 +501,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
   if (loading) {
     return (
-      <main className="app-shell min-h-screen flex-1 bg-[#f6f7fb] px-4 py-8 sm:px-6">
-        <div className="mx-auto w-full max-w-5xl rounded-[2rem] bg-white px-6 py-12 text-center text-sm text-slate-600 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+      <main className="app-shell min-h-screen flex-1 px-4 py-8 sm:px-6">
+        <div className="surface-card mx-auto w-full max-w-5xl rounded-[2rem] px-6 py-12 text-center text-sm text-slate-600">
           Loading document workspace...
         </div>
       </main>
@@ -525,8 +511,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
   if (error && !document) {
     return (
-      <main className="app-shell min-h-screen flex-1 bg-[#f6f7fb] px-4 py-8 sm:px-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-[2rem] bg-white p-8 shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+      <main className="app-shell min-h-screen flex-1 px-4 py-8 sm:px-6">
+        <div className="surface-card mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-[2rem] p-8">
           <p className="section-label text-red-500">Document error</p>
           <h1 className="text-3xl font-semibold text-slate-950">This document could not load.</h1>
           <p className="text-sm leading-7 text-red-700">{error}</p>
@@ -543,8 +529,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   }
 
   return (
-    <main className="app-shell min-h-screen flex-1 bg-[#f6f7fb]">
-      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <main className="app-shell min-h-screen flex-1">
+      <div className="sticky top-0 z-20 border-b border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.92)] backdrop-blur">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex min-w-0 items-start gap-4">
@@ -560,9 +546,9 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   value={title}
                   onChange={handleTitleChange}
                   disabled={!canEdit(role)}
-                  className="w-full min-w-0 bg-transparent text-[1.7rem] font-semibold tracking-tight text-slate-900 outline-none disabled:text-slate-900"
+                  className="w-full min-w-0 bg-transparent text-[1.8rem] font-semibold tracking-tight text-slate-900 outline-none disabled:text-slate-900"
                 />
-                <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-[0.92rem] text-slate-500">
                   <span>{saveStateLabel}</span>
                   <span>•</span>
                   <span>{lastUpdated}</span>
@@ -571,10 +557,20 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <span className="pill border-0 bg-[rgba(31,122,224,0.09)] text-[#1f4aa8]">Role {role}</span>
-              <span className="pill border-0 bg-[rgba(107,92,255,0.1)] text-[#4b3dd1]">
+              <span className="pill border-0 bg-[rgba(49,94,138,0.09)] text-[#315e8a]">
+                {role.charAt(0).toUpperCase() + role.slice(1)}
+              </span>
+              <span className="pill border-0 bg-[rgba(49,94,138,0.09)] text-[#315e8a]">
                 {connectionLabel(connectionStatus)}
               </span>
+              <button
+                type="button"
+                onClick={openAiPanel}
+                className="button-secondary inline-flex h-11 items-center gap-3 rounded-full px-3 pr-5"
+              >
+                <AppLogo compact />
+                <span>AI assistant</span>
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSaveDocument()}
@@ -586,18 +582,17 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 rounded-[1.6rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.08),rgba(107,92,255,0.08),rgba(217,70,239,0.06))] px-4 py-3">
+          <div className="soft-panel flex flex-wrap items-center gap-3 rounded-[1.6rem] px-4 py-3">
             <span className="pill border-0 bg-white text-slate-700">{wordCount} words</span>
             <span className="pill border-0 bg-white text-slate-700">{selectedText.length} selected</span>
             <span className="pill border-0 bg-white text-slate-700">
               {canUseAi(role) ? "AI available" : "AI disabled"}
             </span>
-            <span className="pill border-0 bg-white text-slate-700">Realtime room</span>
           </div>
         </div>
       </div>
 
-      <div className="mx-auto grid w-full max-w-[1600px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr),360px] lg:px-8">
+      <div className="mx-auto grid w-full max-w-[1600px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr),340px] lg:px-8">
         <section className="min-w-0">
           <div className="space-y-4">
             {!canEdit(role) ? (
@@ -613,16 +608,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             {error ? <div className="notice notice-error">{error}</div> : null}
           </div>
 
-          <form
-            onSubmit={handleSaveDocument}
-            className="mt-4 rounded-[2rem] bg-[linear-gradient(180deg,#eef3ff,#f4f0ff)] p-4 sm:p-6"
-          >
+          <form onSubmit={handleSaveDocument} className="canvas-panel mt-4 rounded-[2rem] p-4 sm:p-6">
             <div className="mx-auto mb-3 flex w-full max-w-[880px] items-center justify-between px-3 text-xs uppercase tracking-[0.24em] text-slate-400">
               <span>Document editor</span>
               <span>{wordCount} words</span>
             </div>
 
-            <div className="mx-auto w-full max-w-[880px] rounded-[0.35rem] bg-white px-10 py-12 shadow-[0_20px_44px_rgba(15,23,42,0.12)] sm:px-14 sm:py-14">
+            <div className="mx-auto w-full max-w-[860px] rounded-[0.35rem] bg-white px-10 py-12 shadow-[0_22px_48px_rgba(24,38,52,0.12)] sm:px-14 sm:py-16">
               <textarea
                 ref={editorRef}
                 value={content}
@@ -630,7 +622,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 onSelect={(event) => syncSelection(event.currentTarget)}
                 disabled={!canEdit(role)}
                 rows={26}
-                className="min-h-[68vh] w-full resize-none border-0 bg-transparent text-[1.08rem] leading-[2.1rem] text-slate-800 outline-none disabled:text-slate-700"
+                className="min-h-[68vh] w-full resize-none border-0 bg-transparent text-[1.06rem] leading-[2.08rem] text-slate-800 outline-none disabled:text-slate-700"
                 placeholder="Start writing here. Select text to rewrite, summarize, translate, or restructure it from the AI panel."
               />
             </div>
@@ -638,37 +630,40 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         </section>
 
         <aside className="space-y-5">
-          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
+          <section className="surface-card rounded-[1.8rem] p-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-lg font-semibold text-slate-900">Collaboration</p>
-                <p className="mt-1 text-sm text-slate-500">Role, connection, and room presence</p>
+                <p className="text-lg font-semibold text-slate-900">Session</p>
+                <p className="mt-1 text-sm text-slate-500">Current role, connection state, and room presence</p>
               </div>
-              <span className="pill border-0 bg-[rgba(31,122,224,0.1)] text-[#1f4aa8]">
+              <span className="pill border-0 bg-[rgba(49,94,138,0.08)] text-[#315e8a]">
                 {connectionLabel(connectionStatus)}
               </span>
             </div>
 
             <div className="mt-4 grid gap-3">
-              <div className="rounded-2xl bg-slate-50 px-4 py-3">
+              <div className="rounded-2xl border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-4 py-3">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Connection</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">{connectionLabel(connectionStatus)}</div>
+              </div>
+              <div className="rounded-2xl border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-4 py-3">
                 <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Presence</div>
                 <div className="mt-1 text-xl font-semibold text-slate-900">{presence.length}</div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Updated</div>
-                <div className="mt-1 text-sm font-medium text-slate-800">{lastUpdated}</div>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Open the same document in another tab to see presence updates here.
+                </p>
               </div>
             </div>
 
-            <div className="mt-4 rounded-[1.4rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.05),rgba(107,92,255,0.05),rgba(217,70,239,0.04))] p-4">
-              <RolePicker value={role} onChange={setRole} label="Demo role" />
+            <div className="mt-4 rounded-[1.4rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] p-4">
+              <RolePicker value={role} onChange={setRole} label="Current role" />
             </div>
 
             <div className="mt-4 space-y-2">
               {presence.map((person) => (
                 <div
                   key={person.id}
-                  className="flex items-center justify-between rounded-2xl border border-slate-200 px-3 py-3"
+                  className="flex items-center justify-between rounded-2xl border border-[rgba(27,36,48,0.08)] bg-white/78 px-3 py-3"
                 >
                   <div>
                     <div className="text-sm font-medium text-slate-900">{person.label}</div>
@@ -685,108 +680,110 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             </div>
           </section>
 
-          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-lg font-semibold text-slate-900">AI assistant</p>
-                <p className="mt-1 text-sm text-slate-500">Run one action on the selected text</p>
-              </div>
-              <div className="rounded-full bg-[linear-gradient(135deg,rgba(31,122,224,0.12),rgba(107,92,255,0.12),rgba(217,70,239,0.08))] p-1.5">
-                <AppLogo compact />
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-[1.4rem] bg-[linear-gradient(135deg,rgba(31,122,224,0.08),rgba(107,92,255,0.08),rgba(217,70,239,0.06))] p-4">
-              <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Selected text</div>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{selectedTextPreview}</p>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <select
-                value={aiFeature}
-                onChange={(event) => setAiFeature(event.target.value as AIFeature)}
-                disabled={!canUseAi(role)}
-                className="field-select"
-              >
-                {aiFeatures.map((feature) => (
-                  <option key={feature.value} value={feature.value}>
-                    {feature.label}
-                  </option>
-                ))}
-              </select>
-
-              {aiFeature === "translate" ? (
-                <input
-                  value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.target.value)}
-                  disabled={!canUseAi(role)}
-                  className="field"
-                  placeholder="Target language"
-                />
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => void handleInvokeAi()}
-                disabled={!canUseAi(role) || aiBusy}
-                className="button-primary h-12 w-full rounded-full"
-              >
-                {aiBusy ? "Running..." : `Run ${aiFeatures.find((item) => item.value === aiFeature)?.label}`}
-              </button>
-
-              {!canUseAi(role) ? (
-                <div className="notice notice-warn">
-                  AI actions are available only for owner and editor roles in the frontend demo.
-                </div>
-              ) : null}
-
-              {aiError ? <div className="notice notice-error">{aiError}</div> : null}
-            </div>
-
-            <div className="mt-4 rounded-[1.4rem] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,246,255,0.98))] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-slate-900">Suggestion</p>
-                <button
-                  type="button"
-                  onClick={handleApplySuggestion}
-                  disabled={!aiResult || !canEdit(role)}
-                  className="button-secondary rounded-full px-4 py-2"
-                >
-                  Apply
-                </button>
-              </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
-                {aiResult || "AI output will appear here after you run an action."}
-              </p>
-            </div>
-          </section>
-
-          <section className="rounded-[1.8rem] bg-white p-5 shadow-[0_10px_26px_rgba(15,23,42,0.05)]">
-            <p className="text-lg font-semibold text-slate-900">Room activity</p>
-            <div className="mt-4 space-y-3">
-              {activity.map((item) => (
-                <div
-                  key={item.id}
-                  className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
-                    item.tone === "accent"
-                      ? "bg-[rgba(31,122,224,0.08)] text-[#1f4aa8]"
-                      : "bg-slate-50 text-slate-600"
-                  }`}
-                >
-                  <div className="font-medium">{item.message}</div>
-                  <div className="mt-1 text-xs opacity-80">{formatTimestamp(item.createdAt)}</div>
-                </div>
-              ))}
-
-              {activity.length === 0 ? (
-                <p className="text-sm leading-6 text-slate-500">
-                  Join the room from another client to see presence and reconnect updates here.
-                </p>
-              ) : null}
-            </div>
-          </section>
         </aside>
       </div>
+
+      {aiPanelOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close AI assistant"
+            className="fixed inset-0 z-30 bg-[rgba(17,17,17,0.18)]"
+            onClick={() => setAiPanelOpen(false)}
+          />
+          <section className="fixed inset-y-0 right-0 z-40 w-full max-w-[28rem] border-l border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.98)] px-5 py-5 shadow-[-18px_0_42px_rgba(15,23,42,0.14)] backdrop-blur sm:px-6">
+            <div className="flex h-full flex-col">
+              <div className="flex items-start justify-between gap-4 border-b border-[rgba(27,36,48,0.08)] pb-4">
+                <div className="flex items-center gap-3">
+                  <AppLogo compact />
+                  <div>
+                    <p className="text-lg font-semibold text-slate-900">AI assistant</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Select text, run a suggestion, then apply it if it fits.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiPanelOpen(false)}
+                  className="button-subtle h-10 w-10 rounded-full"
+                  aria-label="Close AI assistant"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+
+              <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
+                <div className="rounded-[1.4rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.62)] p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Selected text</div>
+                  <p className="mt-2 text-[0.94rem] leading-6 text-slate-600">{selectedTextPreview}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <select
+                    value={aiFeature}
+                    onChange={(event) => setAiFeature(event.target.value as AIFeature)}
+                    disabled={!canUseAi(role)}
+                    className="field-select"
+                  >
+                    {aiFeatures.map((feature) => (
+                      <option key={feature.value} value={feature.value}>
+                        {feature.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {aiFeature === "translate" ? (
+                    <input
+                      value={targetLanguage}
+                      onChange={(event) => setTargetLanguage(event.target.value)}
+                      disabled={!canUseAi(role)}
+                      className="field"
+                      placeholder="Target language"
+                    />
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleInvokeAi()}
+                    disabled={!canUseAi(role) || aiBusy}
+                    className="button-primary h-12 w-full rounded-full"
+                  >
+                    {aiBusy
+                      ? "Running..."
+                      : `Run ${aiFeatures.find((item) => item.value === aiFeature)?.label}`}
+                  </button>
+
+                  {!canUseAi(role) ? (
+                    <div className="notice notice-warn">
+                      AI actions are available only for owner and editor roles in the frontend demo.
+                    </div>
+                  ) : null}
+
+                  {aiError ? <div className="notice notice-error">{aiError}</div> : null}
+                </div>
+
+                <div className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-900">Suggestion</p>
+                    <button
+                      type="button"
+                      onClick={handleApplySuggestion}
+                      disabled={!aiResult || !canEdit(role)}
+                      className="button-secondary rounded-full px-4 py-2"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                    {aiResult || "AI output will appear here after you run an action."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
     </main>
   );
 }
