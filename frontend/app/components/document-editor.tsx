@@ -19,6 +19,7 @@ import {
   updateDocument,
 } from "@/app/lib/api";
 import { WS_BASE_URL } from "@/app/lib/config";
+import { formatTimestamp, readStoredRole, writeStoredRole } from "@/app/lib/ui";
 import {
   canCreateVersions,
   canEdit,
@@ -30,8 +31,6 @@ import {
   type UserRole,
 } from "@/app/lib/types";
 import RolePicker from "./role-picker";
-
-const roleStorageKey = "atlas-role";
 
 type ConnectionStatus = "connecting" | "live" | "reconnecting" | "offline" | "error";
 
@@ -63,13 +62,6 @@ const aiFeatures: Array<{ value: AIFeature; label: string }> = [
   { value: "translate", label: "Translate" },
   { value: "restructure", label: "Restructure" },
 ];
-
-function formatTimestamp(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function buildActivity(message: string, tone: ActivityItem["tone"] = "neutral"): ActivityItem {
   return {
@@ -134,26 +126,21 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    const savedRole = window.localStorage.getItem(roleStorageKey);
-    if (
-      savedRole === "owner" ||
-      savedRole === "editor" ||
-      savedRole === "commenter" ||
-      savedRole === "viewer"
-    ) {
+    const savedRole = readStoredRole();
+    if (savedRole) {
       setRole(savedRole);
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(roleStorageKey, role);
+    writeStoredRole(role);
   }, [role]);
 
-  const pushActivity = useEffectEvent((message: string, tone: ActivityItem["tone"] = "neutral") => {
+  function pushActivity(message: string, tone: ActivityItem["tone"] = "neutral") {
     setActivity((current) => [buildActivity(message, tone), ...current].slice(0, 14));
-  });
+  }
 
-  const refreshSupplementaryData = useEffectEvent(async () => {
+  async function refreshSupplementaryData() {
     const [versionResult, historyResult] = await Promise.allSettled([
       listVersions(documentId),
       listAiHistory(),
@@ -166,27 +153,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     if (historyResult.status === "fulfilled") {
       setHistory(historyResult.value.filter((item) => item.document_id === documentId));
     }
-  });
-
-  const loadDocumentState = useEffectEvent(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const currentDocument = await getDocument(documentId);
-      setDocument(currentDocument);
-      setTitle(currentDocument.title);
-      setContent(currentDocument.content);
-      setDirty(false);
-      await refreshSupplementaryData();
-    } catch (requestError) {
-      const message =
-        requestError instanceof Error ? requestError.message : "Failed to load document.";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  });
+  }
 
   useEffect(() => {
     if (!Number.isFinite(documentId) || documentId <= 0) {
@@ -195,12 +162,44 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       return;
     }
 
-    setPresence([]);
-    setActivity([]);
-    setAiResult("");
-    setAiError(null);
-    void loadDocumentState();
-  }, [documentId, loadDocumentState]);
+    async function run() {
+      setLoading(true);
+      setError(null);
+      setPresence([]);
+      setActivity([]);
+      setAiResult("");
+      setAiError(null);
+
+      try {
+        const currentDocument = await getDocument(documentId);
+        setDocument(currentDocument);
+        setTitle(currentDocument.title);
+        setContent(currentDocument.content);
+        setDirty(false);
+
+        const [versionResult, historyResult] = await Promise.allSettled([
+          listVersions(documentId),
+          listAiHistory(),
+        ]);
+
+        if (versionResult.status === "fulfilled") {
+          setVersions(versionResult.value);
+        }
+
+        if (historyResult.status === "fulfilled") {
+          setHistory(historyResult.value.filter((item) => item.document_id === documentId));
+        }
+      } catch (requestError) {
+        const message =
+          requestError instanceof Error ? requestError.message : "Failed to load document.";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void run();
+  }, [documentId]);
 
   function broadcast(payload: BroadcastPayload) {
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
@@ -286,6 +285,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   useEffect(() => {
     let cancelled = false;
     let reconnectAttempts = 0;
+    const clientId = clientIdRef.current;
 
     function connect() {
       setConnectionStatus(reconnectAttempts > 0 ? "reconnecting" : "connecting");
@@ -303,7 +303,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         setRemoteDraftNotice(null);
 
         const actor: PresenceActor = {
-          id: clientIdRef.current,
+          id: clientId,
           label: `Local ${role}`,
           role,
         };
@@ -356,7 +356,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
           JSON.stringify({
             type: "presence-sync",
             actor: {
-              id: clientIdRef.current,
+              id: clientId,
               label: `Local ${role}`,
               role,
             },
@@ -368,7 +368,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       socket?.close();
       socketRef.current = null;
     };
-  }, [documentId, handleSocketMessage, role]);
+  }, [documentId, role]);
 
   useEffect(() => {
     if (!draftSignal || !document || !canEdit(role) || connectionStatus !== "live") {
@@ -585,43 +585,35 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             <div className="space-y-3">
               <Link
                 href="/"
-                className="inline-flex rounded-full border border-black/10 bg-white/80 px-4 py-2 text-xs uppercase tracking-[0.24em] text-slate-700"
+                className="pill"
               >
                 Back to dashboard
               </Link>
               <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                  Document #{document?.id}
-                </p>
+                <p className="section-label">Document #{document?.id}</p>
                 <h1 className="mt-2 text-3xl font-semibold text-slate-950 sm:text-5xl">
                   {title || document?.title || "Untitled draft"}
                 </h1>
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
-                  This editor page covers the frontend ownership slice: update flow, AI suggestion
-                  review, version snapshots, and collaboration room status.
+                  Edit the draft, review AI output, and monitor the local collaboration room from
+                  one screen.
                 </p>
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[29rem]">
-              <div className="rounded-[1.5rem] border border-black/10 bg-white/70 p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Connection
-                </p>
+              <div className="metric">
+                <p className="section-label">Connection</p>
                 <p className="mt-3 text-xl font-semibold text-slate-950">
                   {connectionLabel(connectionStatus)}
                 </p>
               </div>
-              <div className="rounded-[1.5rem] border border-black/10 bg-white/70 p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Presence
-                </p>
+              <div className="metric">
+                <p className="section-label">Presence</p>
                 <p className="mt-3 text-xl font-semibold text-slate-950">{presence.length}</p>
               </div>
-              <div className="rounded-[1.5rem] border border-black/10 bg-white/70 p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  Last updated
-                </p>
+              <div className="metric">
+                <p className="section-label">Last updated</p>
                 <p className="mt-3 text-sm font-medium text-slate-900">
                   {document ? formatTimestamp(document.updated_at) : "Unavailable"}
                 </p>
@@ -638,16 +630,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Editor</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-                    Draft workspace
-                  </h2>
+                  <p className="section-label">Editor</p>
+                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Draft</h2>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="submit"
                     disabled={!canEdit(role) || saving || !dirty}
-                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="button-primary"
                   >
                     {saving ? "Saving..." : dirty ? "Save document" : "Saved"}
                   </button>
@@ -655,7 +645,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     type="button"
                     disabled={!canCreateVersions(role) || saving}
                     onClick={handleCreateVersion}
-                    className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="button-secondary"
                   >
                     Save version snapshot
                   </button>
@@ -667,7 +657,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   value={title}
                   onChange={handleTitleChange}
                   disabled={!canEdit(role)}
-                  className="w-full rounded-2xl border border-black/10 bg-white/90 px-4 py-3 text-2xl font-semibold text-slate-950 shadow-sm disabled:bg-slate-100"
+                  className="field text-2xl font-semibold disabled:bg-slate-100"
                 />
 
                 <textarea
@@ -677,13 +667,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   onSelect={(event) => syncSelection(event.currentTarget)}
                   disabled={!canEdit(role)}
                   rows={20}
-                  className="min-h-[28rem] w-full rounded-[1.5rem] border border-black/10 bg-white/95 px-5 py-4 text-sm leading-8 text-slate-900 shadow-sm disabled:bg-slate-100"
+                  className="field-area min-h-[28rem] disabled:bg-slate-100"
                 />
               </div>
 
               <div className="mt-5 flex flex-col gap-3 text-sm">
                 {!canEdit(role) ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+                  <div className="notice notice-warn">
                     {role === "commenter"
                       ? "Commenter mode is read-only for now. You can review text, versions, and AI history."
                       : "Viewer mode is read-only. Editing and AI actions are intentionally disabled."}
@@ -691,34 +681,22 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 ) : null}
 
                 {remoteDraftNotice ? (
-                  <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-800">
-                    {remoteDraftNotice}
-                  </div>
+                  <div className="notice notice-info">{remoteDraftNotice}</div>
                 ) : null}
 
-                {saveMessage ? (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
-                    {saveMessage}
-                  </div>
-                ) : null}
+                {saveMessage ? <div className="notice notice-success">{saveMessage}</div> : null}
 
-                {error ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                    {error}
-                  </div>
-                ) : null}
+                {error ? <div className="notice notice-error">{error}</div> : null}
               </div>
             </form>
 
             <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">AI panel</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-                    Suggest, review, and apply
-                  </h2>
+                  <p className="section-label">AI panel</p>
+                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Suggestion review</h2>
                 </div>
-                <div className="rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-xs uppercase tracking-[0.2em] text-slate-500">
+                <div className="pill">
                   Selection length: {selectedText.length}
                 </div>
               </div>
@@ -728,7 +706,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   <select
                     value={aiFeature}
                     onChange={(event) => setAiFeature(event.target.value as AIFeature)}
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-4 py-3 text-sm shadow-sm"
+                    className="field-select"
                   >
                     {aiFeatures.map((feature) => (
                       <option key={feature.value} value={feature.value}>
@@ -742,13 +720,11 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     onChange={(event) => setTargetLanguage(event.target.value)}
                     disabled={aiFeature !== "translate"}
                     placeholder="Target language"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-4 py-3 text-sm shadow-sm disabled:bg-slate-100"
+                    className="field disabled:bg-slate-100"
                   />
 
-                  <div className="rounded-[1.5rem] border border-black/10 bg-white/70 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                      Selected text
-                    </p>
+                  <div className="panel p-4">
+                    <p className="section-label">Selected text</p>
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
                       {selectedText || "Select text inside the editor to prepare an AI request."}
                     </p>
@@ -758,30 +734,24 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     type="button"
                     onClick={handleInvokeAi}
                     disabled={!canUseAi(role) || aiBusy}
-                    className="w-full rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="button-primary w-full"
                   >
                     {aiBusy ? "Requesting suggestion..." : "Run AI suggestion"}
                   </button>
 
                   {!canUseAi(role) ? (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <div className="notice notice-warn">
                       AI is disabled for {role} mode. The assignment report expects a clear message
                       instead of a silent failure, so the frontend explains the restriction here.
                     </div>
                   ) : null}
 
-                  {aiError ? (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      {aiError}
-                    </div>
-                  ) : null}
+                  {aiError ? <div className="notice notice-error">{aiError}</div> : null}
                 </div>
 
                 <div className="space-y-4">
-                  <div className="rounded-[1.5rem] border border-black/10 bg-slate-950 p-4 text-slate-100">
-                    <p className="text-xs uppercase tracking-[0.24em] text-slate-400">
-                      Suggestion result
-                    </p>
+                  <div className="rounded-[1.5rem] border border-black/10 bg-slate-950 p-4 text-slate-100 shadow-[0_10px_28px_rgba(15,23,42,0.15)]">
+                    <p className="section-label text-slate-400">Suggestion result</p>
                     <p className="mt-3 min-h-48 whitespace-pre-wrap text-sm leading-7 text-slate-200">
                       {aiResult || "AI output will appear here for review before you apply it."}
                     </p>
@@ -791,7 +761,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     type="button"
                     onClick={handleApplySuggestion}
                     disabled={!aiResult || !canEdit(role)}
-                    className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="button-secondary w-full"
                   >
                     Apply suggestion to draft
                   </button>
@@ -804,30 +774,19 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
               <RolePicker value={role} onChange={setRole} label="Demo role" />
 
-              <div className="mt-6 rounded-[1.5rem] border border-dashed border-black/15 bg-white/50 p-4 text-sm leading-7 text-slate-700">
-                The backend still needs real local auth and permission checks. This frontend role
-                switcher keeps your demo aligned with the intended owner, editor, commenter, and
-                viewer experiences until Person 2 finishes the auth layer.
+              <div className="panel-muted mt-6 p-4 text-sm leading-7 text-slate-700">
+                Role changes here are frontend-only for the demo until backend permissions are
+                implemented.
               </div>
             </div>
 
             <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Realtime</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-                    Presence and reconnecting
-                  </h2>
+                  <p className="section-label">Realtime</p>
+                  <h2 className="mt-2 text-3xl font-semibold text-slate-950">Room status</h2>
                 </div>
-                <span
-                  className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.24em] ${
-                    connectionStatus === "live"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : connectionStatus === "reconnecting"
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-slate-100 text-slate-700"
-                  }`}
-                >
+                <span className="pill">
                   {connectionLabel(connectionStatus)}
                 </span>
               </div>
@@ -836,19 +795,19 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 {presence.map((person) => (
                   <div
                     key={person.id}
-                    className="flex items-center justify-between rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm text-slate-700"
+                    className="panel flex items-center justify-between px-4 py-3 text-sm text-slate-700"
                   >
                     <span>{person.label}</span>
-                    <span className="rounded-full bg-black px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white">
+                    <span className="pill">
                       {person.role}
                     </span>
                   </div>
                 ))}
 
                 {presence.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-black/15 bg-white/50 px-4 py-5 text-sm text-slate-600">
+                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
                     No active collaborators detected yet. Open this document in a second tab to test
-                    the room behavior.
+                    presence and reconnecting.
                   </div>
                 ) : null}
               </div>
@@ -876,7 +835,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
             <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
               <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Versions</p>
+                <p className="section-label">Versions</p>
                 <h2 className="mt-2 text-3xl font-semibold text-slate-950">Version snapshots</h2>
               </div>
 
@@ -886,7 +845,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   onChange={(event) => setVersionLabel(event.target.value)}
                   placeholder="Before AI rewrite"
                   disabled={!canCreateVersions(role)}
-                  className="w-full rounded-2xl border border-black/10 bg-white/90 px-4 py-3 text-sm shadow-sm disabled:bg-slate-100"
+                  className="field disabled:bg-slate-100"
                 />
               </div>
 
@@ -917,7 +876,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 ))}
 
                 {versions.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-black/15 bg-white/50 px-4 py-5 text-sm text-slate-600">
+                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
                     No saved versions yet. Owners can create snapshots from the editor toolbar.
                   </div>
                 ) : null}
@@ -926,10 +885,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
             <div className="ink-card rounded-[1.75rem] border border-black/10 p-6">
               <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-500">AI history</p>
-                <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-                  Document-specific suggestions
-                </h2>
+                <p className="section-label">AI history</p>
+                <h2 className="mt-2 text-3xl font-semibold text-slate-950">Recent suggestions</h2>
               </div>
 
               <div className="mt-6 space-y-3">
@@ -951,7 +908,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 ))}
 
                 {history.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-black/15 bg-white/50 px-4 py-5 text-sm text-slate-600">
+                  <div className="panel-muted px-4 py-5 text-sm text-slate-600">
                     AI history will populate here after the first successful request for this
                     document.
                   </div>
