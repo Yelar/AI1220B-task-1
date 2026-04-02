@@ -35,6 +35,7 @@ export type AIInvokeResponse = {
   model_name: string;
   provider: string;
   status: string;
+  mocked?: boolean;
 };
 
 export type HealthResponse = {

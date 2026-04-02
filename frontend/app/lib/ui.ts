@@ -2,6 +2,13 @@ import type { UserRole } from "./types";
 
 export const roleStorageKey = "atlas-role";
 
+const demoUserIds: Record<UserRole, number> = {
+  owner: 1,
+  editor: 2,
+  commenter: 3,
+  viewer: 4,
+};
+
 export function readStoredRole(): UserRole | null {
   if (typeof window === "undefined") {
     return null;
@@ -26,6 +33,40 @@ export function writeStoredRole(role: UserRole) {
   }
 
   window.localStorage.setItem(roleStorageKey, role);
+}
+
+export function getStoredRoleOrDefault(): UserRole {
+  return readStoredRole() ?? "owner";
+}
+
+export function getDemoUserIdForRole(role: UserRole) {
+  return demoUserIds[role];
+}
+
+export function getDemoIdentityForRole(role: UserRole) {
+  return {
+    role,
+    userId: getDemoUserIdForRole(role),
+    userName: `${role.charAt(0).toUpperCase() + role.slice(1)} Demo`,
+  };
+}
+
+export function getDemoIdentityFromStoredRole() {
+  return getDemoIdentityForRole(getStoredRoleOrDefault());
+}
+
+export function getRoleForDemoUserId(userId: number | string): UserRole {
+  const numericId = Number(userId);
+  if (numericId === 1) {
+    return "owner";
+  }
+  if (numericId === 2) {
+    return "editor";
+  }
+  if (numericId === 3) {
+    return "commenter";
+  }
+  return "viewer";
 }
 
 export function formatTimestamp(value: string) {

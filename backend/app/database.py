@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -32,6 +32,37 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+def ensure_local_schema() -> None:
+    if not settings.database_url.startswith("sqlite"):
+        Base.metadata.create_all(bind=engine)
+        return
+
+    inspector = inspect(engine)
+    documents_columns = {
+        column["name"] for column in inspector.get_columns("documents")
+    } if inspector.has_table("documents") else set()
+    ai_interactions_columns = {
+        column["name"] for column in inspector.get_columns("ai_interactions")
+    } if inspector.has_table("ai_interactions") else set()
+
+    schema_is_current = (
+        inspector.has_table("users")
+        and inspector.has_table("documents")
+        and inspector.has_table("document_permissions")
+        and inspector.has_table("document_versions")
+        and inspector.has_table("ai_interactions")
+        and "owner_id" in documents_columns
+        and "user_id" in ai_interactions_columns
+    )
+
+    if schema_is_current:
+        Base.metadata.create_all(bind=engine)
+        return
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
 
 
 def get_db():

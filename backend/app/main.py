@@ -6,17 +6,19 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import ensure_local_schema, seed_demo_users
 from app.realtime import manager
 from app.routers import ai, documents
 from app.schemas import HealthResponse
 
-Base.metadata.create_all(bind=engine)
+ensure_local_schema()
+seed_demo_users()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    ensure_local_schema()
+    seed_demo_users()
     yield
 
 

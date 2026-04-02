@@ -6,6 +6,7 @@ import type {
   DocumentVersion,
   HealthResponse,
 } from "./types";
+import { getDemoIdentityFromStoredRole } from "./ui";
 
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
@@ -26,10 +27,12 @@ export class ApiError extends Error {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const identity = getDemoIdentityFromStoredRole();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      "X-User-Id": String(identity.userId),
       ...(options.headers ?? {}),
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

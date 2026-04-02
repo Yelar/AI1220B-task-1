@@ -17,7 +17,14 @@ import {
   updateDocument,
 } from "@/app/lib/api";
 import { WS_BASE_URL } from "@/app/lib/config";
-import { formatTimestamp, getExcerpt, readStoredRole, writeStoredRole } from "@/app/lib/ui";
+import {
+  formatTimestamp,
+  getDemoIdentityForRole,
+  getExcerpt,
+  getRoleForDemoUserId,
+  readStoredRole,
+  writeStoredRole,
+} from "@/app/lib/ui";
 import {
   canEdit,
   canUseAi,
@@ -33,15 +40,51 @@ type PresenceActor = {
   id: string;
   label: string;
   role: UserRole;
+  userId: number;
 };
 
-type BroadcastPayload = {
-  type: string;
-  actor?: PresenceActor;
-  title?: string;
-  content?: string;
-  feature?: AIFeature;
-  message?: string;
+type PresenceWire = {
+  userId: string | number;
+  userName: string;
+  clientId: string;
+  cursor?: { from?: number; to?: number } | null;
+  selection?: { from?: number; to?: number } | null;
+};
+
+type SocketMessage =
+  | {
+      type: "connection:ack";
+      documentId: string;
+      clientId: string;
+      participants: PresenceWire[];
+    }
+  | {
+      type: "presence:sync";
+      documentId: string;
+      participants: PresenceWire[];
+    }
+  | {
+      type: "document:update";
+      documentId: string;
+      sender: {
+        userId: string | number;
+        userName: string;
+        clientId: string;
+      };
+      payload: {
+        title?: string;
+        content?: string;
+      };
+    }
+  | {
+      type: "error";
+      documentId: string;
+      message: string;
+    };
+
+type DocumentUpdatePayload = {
+  title: string;
+  content: string;
 };
 
 const aiFeatures: Array<{ value: AIFeature; label: string }> = [
@@ -113,6 +156,17 @@ function connectionLabel(status: ConnectionStatus) {
     default:
       return "Connecting";
   }
+}
+
+function mapParticipant(participant: PresenceWire): PresenceActor {
+  const role = getRoleForDemoUserId(participant.userId);
+
+  return {
+    id: participant.clientId,
+    label: participant.userName,
+    role,
+    userId: Number(participant.userId),
+  };
 }
 
 export default function DocumentEditor({ documentId }: { documentId: number }) {
@@ -187,77 +241,62 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     void run();
   }, [documentId]);
 
-  function broadcast(payload: BroadcastPayload) {
+  function broadcastDocumentUpdate(payload: DocumentUpdatePayload) {
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    socketRef.current.send(JSON.stringify(payload));
+    socketRef.current.send(
+      JSON.stringify({
+        type: "document:update",
+        payload,
+      }),
+    );
   }
 
   const handleSocketMessage = useEffectEvent((event: MessageEvent<string>) => {
-    const parsed = JSON.parse(event.data) as {
-      type?: string;
-      message?: string;
-      payload?: BroadcastPayload;
-    };
+    const parsed = JSON.parse(event.data) as SocketMessage;
 
-    if (parsed.type === "presence" && parsed.message) {
+    if (parsed.type === "connection:ack") {
+      setConnectionStatus("live");
+      setPresence(parsed.participants.map(mapParticipant));
       return;
     }
 
-    if (!parsed.payload) {
+    if (parsed.type === "presence:sync") {
+      setPresence(parsed.participants.map(mapParticipant));
       return;
     }
 
-    const payload = parsed.payload;
-    const actor = payload.actor;
-
-    if (payload.type === "presence-sync" && actor) {
-      if (payload.message === "joined") {
-        setPresence((current) => {
-          const others = current.filter((item) => item.id !== actor.id);
-          return [actor, ...others];
-        });
-      }
-
-      if (payload.message === "left") {
-        setPresence((current) => current.filter((item) => item.id !== actor.id));
-      }
+    if (parsed.type === "error") {
+      setConnectionStatus("error");
+      setRemoteDraftNotice(parsed.message);
       return;
     }
 
-    if (payload.type === "content-update" && actor) {
-      setPresence((current) => {
-        const others = current.filter((item) => item.id !== actor.id);
-        return [actor, ...others];
-      });
-
-      if (actor.id === clientIdRef.current) {
+    if (parsed.type === "document:update") {
+      if (parsed.sender.clientId === clientIdRef.current) {
         return;
       }
 
       if (!dirty) {
-        setTitle(payload.title ?? "");
-        setContent(payload.content ?? "");
+        setTitle(parsed.payload.title ?? "");
+        setContent(parsed.payload.content ?? "");
         setDocument((current) =>
           current
             ? {
                 ...current,
-                title: payload.title ?? current.title,
-                content: payload.content ?? current.content,
+                title: parsed.payload.title ?? current.title,
+                content: parsed.payload.content ?? current.content,
                 updated_at: new Date().toISOString(),
               }
             : current,
         );
       } else {
-        setRemoteDraftNotice(`Live update received from ${actor.label}. Save or refresh when ready.`);
+        setRemoteDraftNotice(
+          `Live update received from ${parsed.sender.userName}. Save or refresh when ready.`,
+        );
       }
-      return;
-    }
-
-    if (payload.type === "ai-request" && actor && actor.id !== clientIdRef.current) {
-      setRemoteDraftNotice(`${actor.label} is using the AI panel in this room.`);
     }
   });
 
@@ -265,10 +304,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     let cancelled = false;
     let reconnectAttempts = 0;
     const clientId = clientIdRef.current;
+    const identity = getDemoIdentityForRole(role);
 
     function connect() {
       setConnectionStatus(reconnectAttempts > 0 ? "reconnecting" : "connecting");
-      const socket = new WebSocket(`${WS_BASE_URL}/documents/${documentId}`);
+      const socket = new WebSocket(
+        `${WS_BASE_URL}/documents/${documentId}?userId=${identity.userId}&userName=${encodeURIComponent(identity.userName)}&clientId=${clientId}`,
+      );
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -278,27 +320,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         }
 
         reconnectAttempts = 0;
-        setConnectionStatus("live");
+        setConnectionStatus("connecting");
         setRemoteDraftNotice(null);
-
-        const actor: PresenceActor = {
-          id: clientId,
-          label: `Local ${role}`,
-          role,
-        };
-
-        setPresence((current) => {
-          const others = current.filter((item) => item.id !== actor.id);
-          return [actor, ...others];
-        });
-
-        socket.send(
-          JSON.stringify({
-            type: "presence-sync",
-            actor,
-            message: "joined",
-          }),
-        );
       };
 
       socket.onmessage = handleSocketMessage;
@@ -329,22 +352,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         clearTimeout(reconnectTimerRef.current);
       }
 
-      const socket = socketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({
-            type: "presence-sync",
-            actor: {
-              id: clientId,
-              label: `Local ${role}`,
-              role,
-            },
-            message: "left",
-          }),
-        );
-      }
-
-      socket?.close();
+      socketRef.current?.close();
       socketRef.current = null;
     };
   }, [documentId, role]);
@@ -355,13 +363,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
 
     const timer = setTimeout(() => {
-      broadcast({
-        type: "content-update",
-        actor: {
-          id: clientIdRef.current,
-          label: `Local ${role}`,
-          role,
-        },
+      broadcastDocumentUpdate({
         title,
         content,
       });
@@ -376,6 +378,16 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setSelectionStart(start);
     setSelectionEnd(end);
     setSelectedText(textarea.value.slice(start, end));
+
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: "presence:update",
+          cursor: { from: end },
+          selection: { from: start, to: end },
+        }),
+      );
+    }
   }
 
   function handleTitleChange(event: ChangeEvent<HTMLInputElement>) {
@@ -436,16 +448,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setAiError(null);
 
     try {
-      broadcast({
-        type: "ai-request",
-        actor: {
-          id: clientIdRef.current,
-          label: `Local ${role}`,
-          role,
-        },
-        feature: aiFeature,
-      });
-
       const response = await invokeAi({
         feature: aiFeature,
         selected_text: selectedText,

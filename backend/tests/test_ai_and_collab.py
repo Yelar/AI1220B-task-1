@@ -3,28 +3,70 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.database import Base, SessionLocal, engine
+from app.database import Base, get_db
 from app.main import app
-from app.models import AIInteraction, Document, DocumentVersion
-from app.services import AIResult, build_lm_studio_chat_url
+from app.models import AIInteraction, Document, DocumentVersion, User
+from app.services import build_lm_studio_chat_url
+
+
+TEST_DATABASE_URL = "sqlite://"
+
+test_engine = create_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(
+    bind=test_engine,
+    autoflush=False,
+    autocommit=False,
+)
+
+
+def auth_headers(user_id: int = 1) -> dict[str, str]:
+    return {"X-User-Id": str(user_id)}
+
+
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 class BackendAITestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=test_engine)
 
     def setUp(self):
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
-        self._clear_database()
+        self._reset_database()
 
     def tearDown(self):
         self.client.close()
-        self._clear_database()
+        app.dependency_overrides.clear()
+        self._reset_database()
 
-    def _clear_database(self):
-        with SessionLocal() as db:
+    def _reset_database(self):
+        Base.metadata.drop_all(bind=test_engine)
+        Base.metadata.create_all(bind=test_engine)
+        with TestingSessionLocal() as db:
+            db.add_all(
+                [
+                    User(email="owner@example.com", name="Owner Demo"),
+                    User(email="editor@example.com", name="Editor Demo"),
+                    User(email="commenter@example.com", name="Commenter Demo"),
+                    User(email="viewer@example.com", name="Viewer Demo"),
+                ]
+            )
+            db.commit()
             db.query(AIInteraction).delete()
             db.query(DocumentVersion).delete()
             db.query(Document).delete()
@@ -37,6 +79,7 @@ class BackendAITestCase(unittest.TestCase):
                 "feature": "summarize",
                 "selected_text": "Mock metadata test paragraph.",
             },
+            headers=auth_headers(),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -49,10 +92,12 @@ class BackendAITestCase(unittest.TestCase):
         first_doc = self.client.post(
             "/api/documents",
             json={"title": "Doc one", "content": "Body one"},
+            headers=auth_headers(),
         ).json()
         second_doc = self.client.post(
             "/api/documents",
             json={"title": "Doc two", "content": "Body two"},
+            headers=auth_headers(),
         ).json()
 
         self.client.post(
@@ -62,6 +107,7 @@ class BackendAITestCase(unittest.TestCase):
                 "selected_text": "Alpha",
                 "document_id": first_doc["id"],
             },
+            headers=auth_headers(),
         )
         self.client.post(
             "/api/ai/invoke",
@@ -70,10 +116,12 @@ class BackendAITestCase(unittest.TestCase):
                 "selected_text": "Beta",
                 "document_id": second_doc["id"],
             },
+            headers=auth_headers(),
         )
 
         response = self.client.get(
-            f"/api/ai/history?document_id={first_doc['id']}&feature=summarize&limit=10"
+            f"/api/ai/history?document_id={first_doc['id']}&feature=summarize&limit=10",
+            headers=auth_headers(),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -98,6 +146,7 @@ class BackendAITestCase(unittest.TestCase):
                     "feature": "summarize",
                     "selected_text": "Failure path paragraph.",
                 },
+                headers=auth_headers(),
             )
 
         self.assertEqual(response.status_code, 502)

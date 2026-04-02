@@ -29,8 +29,6 @@ def override_get_db():
     finally:
         db.close()
 
-
-app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 
@@ -52,7 +50,9 @@ def reset_db():
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
     seed_demo_users_for_tests()
+    app.dependency_overrides[get_db] = override_get_db
     yield
+    app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=test_engine)
 
 
