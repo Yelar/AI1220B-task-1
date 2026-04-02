@@ -29,8 +29,8 @@
 |---|---|---|---|---|
 | FR-COLLAB-001 | The system shall propagate document updates to connected collaborators in near real time | A user edits a shared document | Other active editors receive the change over the collaboration channel | Two browser tabs editing the same document on localhost reflect updates within 150 ms (PoC target) |
 | FR-COLLAB-002 | The system shall show collaborator presence in an active session | Two or more users are connected to the same document | Each user sees who else is online in the document session | Opening 3 clients on the same document shows 3 active participants in the session list |
-| FR-COLLAB-003 | The system shall tolerate temporary disconnection and allow recovery on reconnect | A client loses network connectivity and later reconnects | The client reconnects to the session and resynchronizes the latest document state | After a forced disconnect, reconnecting restores the latest saved state without crashing the session |
-| FR-COLLAB-004 | The system shall notify collaborators when a document is reverted to a saved version | Owner triggers a version revert | Active clients receive a visible notification and updated content | Reverting a version updates all connected clients within 3 seconds |
+| FR-COLLAB-003 | The system shall tolerate temporary disconnection and allow recovery on reconnect | A client loses network connectivity and later reconnects | The client reconnects to the room and resumes receiving presence and document updates | After a forced disconnect, the UI returns to a live connection state and receives subsequent remote updates without crashing |
+| FR-COLLAB-004 | The system shall preserve unsaved local edits when a remote update arrives | Another collaborator sends an update while this client has unsaved changes | The UI keeps the local draft intact and shows a warning instead of silently overwriting it | A dirty editor tab keeps its content and displays a remote-update notice when another client broadcasts a change |
 
 ### AI Writing Assistant
 
@@ -40,7 +40,7 @@
 | FR-AI-002 | The system shall present AI output as a suggestion rather than silently modifying the document | AI response is received | The suggestion is shown in a review area for user approval | The original document remains unchanged until the user explicitly accepts the suggestion |
 | FR-AI-003 | The system shall log AI interactions for later review | An AI request completes | The request and response are stored in the local database | `/api/ai/history` returns the completed interaction with feature type and timestamp |
 | FR-AI-004 | The system shall degrade gracefully if LM Studio is unavailable | An AI request is made while the local LLM server is offline | The system returns a clear error without affecting document editing | The API returns a 502-style failure response and the UI keeps editing enabled |
-| FR-AI-005 | The system shall identify the document region currently being processed by AI | AI request starts on selected text | The frontend can mark the affected region as pending | The response payload includes enough context for the frontend to map the suggestion back to the selected region |
+| FR-AI-005 | The proof of concept shall preserve the user's current text selection while an AI request is processed | User invokes AI on selected text | The frontend keeps the local selection range and can apply the returned suggestion back into that range | Accepting an AI suggestion replaces the selected range, or appends it when no active selection remains |
 
 ### Document Management
 
@@ -114,10 +114,10 @@
 - Acceptance criteria: Two localhost browser windows editing the same document show updates within 150 ms in the PoC.
 
 **US-02:** As an editor, I want to reconnect to an editing session after a connection drop so that I can continue without reopening the whole app.  
-- Acceptance criteria: Reconnecting restores the latest server state and rejoins the presence list.
+- Acceptance criteria: Reconnecting restores the live connection and rejoins the presence list.
 
 **US-03:** As a document owner, I want to revert to a saved version so that I can undo a bad change safely.  
-- Acceptance criteria: Revert restores the saved content and creates a visible update for connected collaborators.
+- Acceptance criteria: Revert restores the saved content and stores the reverted state as a new versioned document snapshot.
 
 ### AI Assistant Workflows
 
@@ -130,8 +130,8 @@
 **US-06:** As an editor, I want to partially apply an AI rewrite so that I stay in control of the final text.  
 - Acceptance criteria: The suggestion is presented separately and the user can manually edit or selectively apply it in the frontend.
 
-**US-07:** As a collaborator, I want to know when another user is running AI on a passage so that I avoid editing the same region at the same moment.  
-- Acceptance criteria: The frontend can show a pending marker for the targeted region.
+**US-07:** As a collaborator, I want to see who is present and where their current selection is so that I avoid editing nearby text blindly.  
+- Acceptance criteria: The presence panel shows active users and their latest cursor or selection positions from collaboration events.
 
 ### Document Lifecycle
 
@@ -160,11 +160,11 @@
 |---|---|---|
 | US-01 | FR-COLLAB-001, FR-COLLAB-002 | Next.js Frontend, FastAPI Collaboration Gateway |
 | US-02 | FR-COLLAB-003 | FastAPI Collaboration Gateway, SQLite Document Store |
-| US-03 | FR-COLLAB-004, FR-DOC-002, FR-DOC-003 | FastAPI Document Service, SQLite |
+| US-03 | FR-DOC-002, FR-DOC-003 | FastAPI Document Service, SQLite |
 | US-04 | FR-AI-001, FR-AI-002, FR-AI-003 | Next.js Frontend, FastAPI AI Service, LM Studio Connector |
 | US-05 | FR-AI-001, FR-AI-002 | FastAPI AI Service, LM Studio Connector |
 | US-06 | FR-AI-002, FR-AI-005 | Next.js Frontend, FastAPI AI Service |
-| US-07 | FR-AI-005, FR-COLLAB-002 | Next.js Frontend, FastAPI Collaboration Gateway |
+| US-07 | FR-COLLAB-002, FR-COLLAB-004 | Next.js Frontend, FastAPI Collaboration Gateway |
 | US-08 | FR-DOC-001, FR-DOC-004 | FastAPI Document Service, SQLite |
 | US-09 | FR-DOC-002, FR-DOC-003 | FastAPI Document Service, SQLite |
 | US-10 | FR-USER-002, FR-USER-003 | FastAPI Auth/Permission Layer, Next.js Frontend |
@@ -355,15 +355,15 @@ The full document is not sent by default. This keeps prompts focused, reduces lo
 #### Suggestion UX
 The AI output is shown in a side panel or suggestion area rather than applied inline immediately.
 - The original text stays unchanged until the user accepts it.
-- The user can edit the suggestion before applying it.
-- Partial application is handled in the frontend by letting the user copy or apply only part of the response.
+- The user can apply the suggestion directly into the selected range or continue editing manually without applying it.
+- Partial adoption is handled pragmatically by applying the suggestion into the editor and then manually refining the text.
 
 #### AI During Collaboration
-- The invoking user marks the selected region as “AI pending”.
-- Other collaborators can still edit outside that region.
-- If the region changes before the response is applied, the frontend should warn the user that the suggestion may now be stale.
+- The invoking user keeps working in the editor while the AI request is processed.
+- Other collaborators continue to receive normal presence and document updates.
+- If remote edits arrive before the suggestion is applied, the UI warns that the local draft may now be stale.
 
-This is a pragmatic compromise for the semester project: predictable and easy to explain, without trying to auto-merge AI edits into a moving target.
+This is a pragmatic compromise for the proof of concept: the system does not lock the edited region or attempt automatic conflict reconciliation for AI-generated text.
 
 #### Prompt Design
 Prompt construction is template-based in backend code.
@@ -392,23 +392,30 @@ Because LM Studio runs locally, the main constraint is not per-token billing but
 | PATCH | `/api/documents/:id` | `{ title?, content?, create_version?, version_label? }` | `200 { ...document }` | 404 |
 | DELETE | `/api/documents/:id` | — | `204` | 404 |
 | GET | `/api/documents/:id/versions` | — | `200 [{ id, document_id, label, content, created_at }]` | 404 |
+| POST | `/api/documents/:id/versions` | `{ label? }` | `201 { id, document_id, label, content, created_at }` | 403, 404 |
+| POST | `/api/documents/:id/versions/:versionId/revert` | — | `200 { ...document }` | 403, 404 |
+| GET | `/api/documents/:id/permissions` | — | `200 [{ id, document_id, user_id, role }]` | 403, 404 |
+| POST | `/api/documents/:id/permissions` | `{ user_id, role }` | `201 { id, document_id, user_id, role }` | 400, 403, 404 |
+| DELETE | `/api/documents/:id/permissions/:userId` | — | `204` | 403, 404 |
+| GET | `/api/documents/:id/export?format=md|txt|json` | — | Download response | 400, 404 |
 
 #### Real-Time Session Management
 
 | Protocol | Endpoint | Description |
 |---|---|---|
-| WebSocket | `/ws/documents/:id` | Broadcasts presence and update messages among clients connected to the same document |
+| WebSocket | `/ws/documents/:id` | Broadcasts structured presence and document update messages among clients connected to the same document |
 
 Message examples:
-- `{"type":"join","user":"alice@example.com"}`
-- `{"type":"update","content":"...delta or document payload..." }`
+- `{"type":"connection:ack","documentId":"1","clientId":"client-123","participants":[...] }`
+- `{"type":"presence:update","cursor":{"from":42},"selection":{"from":30,"to":42}}`
+- `{"type":"document:update","payload":{"title":"Draft","content":"...latest content..."}}`
 
 #### AI Assistant
 
 | Method | Endpoint | Request Body | Response | Errors |
 |---|---|---|---|---|
 | POST | `/api/ai/invoke` | `{ feature, selected_text, surrounding_context?, target_language?, document_id? }` | `200 { feature, output_text, model_name, provider, status }` | 404, 502 |
-| GET | `/api/ai/history` | — | `200 [{ id, document_id, feature, prompt_excerpt, response_text, model_name, status, created_at }]` | 500 |
+| GET | `/api/ai/history?document_id?&feature?&limit?` | — | `200 [{ id, document_id, user_id, feature, prompt_excerpt, response_text, model_name, status, created_at }]` | 404, 500 |
 
 #### User & Permission Management
 
@@ -417,10 +424,15 @@ For the PoC, the authorization model is deliberately simple:
 - per-document roles,
 - backend-enforced permission checks.
 
-Suggested future endpoints:
-- `POST /api/auth/login`
+Current PoC endpoints:
+- `GET /api/users`
 - `GET /api/users/me`
+- `GET /api/documents/:id/permissions`
 - `POST /api/documents/:id/permissions`
+- `DELETE /api/documents/:id/permissions/:userId`
+
+Potential future endpoints:
+- `POST /api/auth/login`
 
 #### API Style Justification
 - **REST** for CRUD and AI invocation because it is simple, testable, and well supported by FastAPI.
@@ -473,6 +485,7 @@ Key choices:
 - AI invocation is limited to editors and owners because it proposes content changes.
 - Version revert is owner-only because it affects all collaborators.
 - The PoC uses local identities instead of external OAuth to reduce setup friction.
+- Dedicated comment threads are not implemented in the current PoC, so the `commenter` role behaves as read-only plus history/presence visibility.
 
 #### Privacy Considerations
 - The LLM runs locally through LM Studio, so document text does not need to leave the evaluator’s machine.
@@ -500,7 +513,7 @@ Polling is simpler but unsuitable for collaboration because:
 2. Frontend opens `ws://.../ws/documents/{id}`.
 3. Backend registers the client in the document room.
 4. Clients broadcast updates and presence changes.
-5. On disconnect, the client reconnects and reloads the latest server state if needed.
+5. On disconnect, the client reconnects and resumes presence and subsequent update delivery; a manual refresh remains available if a full document reload is needed.
 
 ---
 
@@ -510,41 +523,48 @@ Polling is simpler but unsuitable for collaboration because:
 
 **Decision: single submission repository with two app folders.**
 
-This is not a complex workspace setup. The goal is clarity, not tooling sophistication. The current submission keeps the real application code inside `AI1220B-task-1/`, while the parent folder contains assignment artifacts such as `instructions.md`, `report.md`, and the team task split document.
+This is not a complex workspace setup. The goal is clarity, not tooling sophistication. The submission repository itself is `AI1220B-task-1/`, and all code plus supporting assignment artifacts live directly inside that root.
 
 ### Directory Layout
 
 ```text
-swe-task1/
-├── instructions.md
+AI1220B-task-1/
+├── README.md
 ├── report.md
-├── team-task-division.md
 ├── meeting_log.md
-└── AI1220B-task-1/
-    ├── README.md
-    ├── frontend/
-    │   ├── app/
-    │   ├── public/
-    │   ├── package.json
-    │   └── .env.example
-    └── backend/
-        ├── app/
-        │   ├── main.py
-        │   ├── config.py
-        │   ├── database.py
-        │   ├── models.py
-        │   ├── schemas.py
-        │   ├── services.py
-        │   ├── realtime.py
-        │   └── routers/
-        │       ├── documents.py
-        │       └── ai.py
-        ├── tests/
-        │   └── test_documents.py
-        ├── data/
-        ├── requirements.txt
-        ├── .env.example
-        └── README.md
+├── team-task-division.md
+├── diagrams/
+│   ├── c4-level-1-system-context.mermaid
+│   ├── c4-level-2-container.mermaid
+│   └── c4-level-3-backend-components.mermaid
+├── frontend/
+│   ├── app/
+│   │   ├── components/
+│   │   ├── documents/
+│   │   └── lib/
+│   ├── public/
+│   ├── package.json
+│   └── .env.example
+└── backend/
+    ├── app/
+    │   ├── main.py
+    │   ├── config.py
+    │   ├── database.py
+    │   ├── models.py
+    │   ├── schemas.py
+    │   ├── services.py
+    │   ├── realtime.py
+    │   └── routers/
+    │       ├── documents.py
+    │       ├── ai.py
+    │       └── users.py
+    ├── tests/
+    │   ├── test_documents.py
+    │   └── test_ai_and_collab.py
+    ├── data/
+    ├── requirements.txt
+    ├── .env.example
+    └── README.md
 ```
 
 ### Shared Code
@@ -555,16 +575,16 @@ To keep the PoC simple, there is no separate shared package yet.
 This avoids premature repository complexity while still giving a clean upgrade path.
 
 ### Configuration Management
-- Backend environment variables live in `AI1220B-task-1/backend/.env`.
-- Frontend environment variables live in `AI1220B-task-1/frontend/.env.local`.
+- Backend environment variables live in `backend/.env`.
+- Frontend environment variables live in `frontend/.env.local`.
 - The repository tracks only `.env.example` files.
 - Important local settings: SQLite path, LM Studio base URL, LM Studio model name, frontend API base URL.
 
 ### Testing Structure
-- **Backend unit tests:** route and service tests under `backend/tests/` in a later milestone.
-- **Frontend component tests:** UI behavior tests near the corresponding components.
-- **Integration tests:** backend with temporary SQLite database and mocked LM Studio.
-- **End-to-end tests:** Next.js + FastAPI + local mock model or real LM Studio depending on the scenario.
+- **Backend route and service tests:** implemented under `backend/tests/`.
+- **Frontend component tests:** not implemented yet in this PoC.
+- **Integration tests:** backend with temporary SQLite and mocked LM Studio.
+- **End-to-end tests:** still a future extension; current verification relies on manual browser testing plus backend/frontend build checks.
 
 For repeatable automated tests, the backend supports a mock AI mode instead of requiring the real local model every time.
 
@@ -580,7 +600,6 @@ erDiagram
         int id PK
         string email
         string name
-        string global_role
     }
 
     Document {
@@ -690,7 +709,7 @@ The model supports per-document roles. Link sharing and team-based sharing are f
 |---|---|
 | **Status** | Accepted |
 | **Context** | A 3-person team needs a shared codebase with low coordination overhead. |
-| **Decision** | Keep both apps in `AI1220B-task-1/` under `frontend/` and `backend/`, with assignment documents in the parent directory. |
+| **Decision** | Keep both apps and the supporting assignment artifacts in the `AI1220B-task-1/` repository root. |
 | **Consequences** | Positive: easy to understand, easy to submit, fewer moving pieces. Negative: no dedicated shared package yet, so frontend/backend contracts must be kept aligned carefully. |
 | **Alternatives** | Multi-repo and heavier workspace tooling were rejected because they add complexity without helping the PoC. |
 
@@ -829,41 +848,33 @@ Local setup, test scaffolding, and README quality are explicitly planned tasks b
 
 ```mermaid
 gantt
-    title Project Timeline
+    title Project Timeline and Meeting-Aligned Progress
     dateFormat YYYY-MM-DD
     axisFormat %b %d
 
     section M0 Foundations
-    Revise report and finalize stack          :done, m0a, 2026-03-26, 6d
-    Scaffold frontend and backend             :done, m0b, 2026-03-29, 4d
+    Requirements and architecture definition  :done, m0a, 2026-03-02, 4d
+    Frontend and backend scaffolding          :done, m0b, 2026-03-06, 7d
 
-    section M1 Local PoC
-    Document CRUD in FastAPI                  :m1a, 2026-04-02, 5d
-    Frontend document pages                   :m1b, 2026-04-02, 5d
-    LM Studio integration baseline            :m1c, 2026-04-05, 4d
+    section M1 Backend and Data
+    Document CRUD and schema design           :done, m1a, 2026-03-12, 6d
+    Permissions and versioning                :done, m1b, 2026-03-18, 7d
 
-    section M2 Collaboration
-    WebSocket room handling                   :m2a, 2026-04-09, 5d
-    Presence indicators in UI                 :m2b, 2026-04-09, 5d
-    Reconnect handling                        :m2c, 2026-04-12, 4d
+    section M2 Testing and Stabilization
+    Backend test coverage and DB isolation    :done, m2a, 2026-03-25, 7d
+    API validation and integration review     :done, m2b, 2026-04-01, 2d
 
-    section M3 AI Workflow
-    AI suggestion review panel                :m3a, 2026-04-16, 5d
-    AI history and logging                    :m3b, 2026-04-16, 4d
-    Role checks for AI                        :m3c, 2026-04-18, 3d
-
-    section M4 Polish
-    Version revert UX                         :m4a, 2026-04-21, 4d
-    Integration testing                       :m4b, 2026-04-21, 5d
-    Final docs and demo prep                  :m4c, 2026-04-25, 3d
+    section M3 Final Integration and Submission
+    Demo recording and presentation prep      :done, m3a, 2026-04-02, 1d
+    Report and diagram alignment              :done, m3b, 2026-04-02, 1d
+    Final repository cleanup                  :done, m3c, 2026-04-02, 1d
 ```
 
 ### Milestone Acceptance Criteria
 
 | Milestone | Target Date | Acceptance Criteria |
 |---|---|---|
-| **M0: Foundations** | 2026-04-01 | Report updated to match actual stack and repo layout. Backend and frontend starters exist. |
-| **M1: Local PoC** | 2026-04-08 | Local startup works with SQLite and FastAPI CRUD. Frontend can talk to backend. LM Studio endpoint path is wired. |
-| **M2: Collaboration** | 2026-04-15 | Two clients can join the same document room and receive live update events. |
-| **M3: AI Workflow** | 2026-04-20 | Selected text can be sent to LM Studio through the backend and logged locally. |
-| **M4: Polish** | 2026-04-28 | Version flow, basic role checks, integration tests, and demo instructions are in place. |
+| **M0: Foundations** | 2026-03-05 | Completed. Team scope, stack choices, C4 design, and module boundaries were agreed and documented. |
+| **M1: Backend and Data** | 2026-03-18 | Completed. Document CRUD, user roles, permissions, version creation, and revert behavior were implemented in the backend. |
+| **M2: Testing and Stabilization** | 2026-04-01 | Completed. Backend tests passed, API behavior was validated, and integration issues were reviewed before demo prep. |
+| **M3: Final Integration and Submission** | 2026-04-02 | Completed. Demo flow, presentation materials, report updates, and repository preparation were completed for submission. |

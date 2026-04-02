@@ -2,8 +2,10 @@
 
 This submission contains:
 
-- `frontend/`: Next.js starter frontend.
-- `backend/`: FastAPI starter backend with local SQLite persistence and LM Studio integration hooks.
+- `frontend/`: Next.js document dashboard and editor UI.
+- `backend/`: FastAPI backend with local SQLite persistence, role checks, versioning, collaboration, and LM Studio integration.
+- `diagrams/`: editable Mermaid C4 diagram source files used in the report.
+- `report.md`, `meeting_log.md`, `team-task-division.md`: supporting assignment documentation.
 
 ## Local setup
 
@@ -33,7 +35,7 @@ npm run dev
 
 Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000`.
 
-## Starter API
+## API Surface
 
 - `GET /api/health`
 - `GET /api/documents`
@@ -42,6 +44,14 @@ Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000
 - `PATCH /api/documents/{id}`
 - `DELETE /api/documents/{id}`
 - `GET /api/documents/{id}/versions`
+- `POST /api/documents/{id}/versions`
+- `POST /api/documents/{id}/versions/{version_id}/revert`
+- `GET /api/documents/{id}/permissions`
+- `POST /api/documents/{id}/permissions`
+- `DELETE /api/documents/{id}/permissions/{user_id}`
+- `GET /api/documents/{id}/export?format=md|txt|json`
 - `POST /api/ai/invoke`
 - `GET /api/ai/history`
+- `GET /api/users`
+- `GET /api/users/me`
 - `WS /ws/documents/{document_id}`
