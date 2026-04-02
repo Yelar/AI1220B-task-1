@@ -1,0 +1,32 @@
+%% C4 Level 3: Component Diagram for the FastAPI Backend
+graph TB
+    Frontend["Next.js Frontend"]
+    LM["LM Studio"]
+    DB[("SQLite")]
+
+    subgraph backend ["FastAPI Backend"]
+        DocRouter["Document Router"]
+        AiRouter["AI Router"]
+        WsGateway["WebSocket Collaboration Gateway"]
+        AuthLayer["Auth / Role Guard"]
+        DocService["Document Service"]
+        VersionService["Version Service"]
+        AiService["AI Service"]
+        Repo["SQLAlchemy Repository Layer"]
+    end
+
+    Frontend --> DocRouter
+    Frontend --> AiRouter
+    Frontend --> WsGateway
+
+    DocRouter --> AuthLayer
+    AiRouter --> AuthLayer
+    DocRouter --> DocService
+    DocService --> VersionService
+    DocService --> Repo
+    VersionService --> Repo
+    AiRouter --> AiService
+    AiService --> Repo
+    AiService --> LM
+    WsGateway --> Repo
+    Repo --> DB
