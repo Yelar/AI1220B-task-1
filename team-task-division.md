@@ -9,9 +9,9 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [x] Backend stack is `FastAPI`
 - [x] Database for local testing is `SQLite`
 - [x] LLM integration target is `LM Studio`
-- [x] `report.md` was updated to match the actual stack
-- [x] Backend starter exists
-- [x] Frontend starter exists
+- [x] `report.pdf` was updated to match the actual stack
+- [x] Backend implementation exists
+- [x] Frontend implementation exists
 
 ## Working Rules
 
@@ -45,6 +45,10 @@ Use this file as the shared working checklist for both humans and coding agents.
 **Ownership:** `frontend/`
 
 ### Todo
+
+### Done
+- [x] Starter landing page was cleaned up from the default template
+- [x] Frontend env example exists
 - [x] Replace the starter page with a real document dashboard
 - [x] Create a document editor page
 - [x] Add document create/list/open/update flows
@@ -52,15 +56,17 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [x] Add presence and reconnecting UI states
 - [x] Add role-aware UI states for owner/editor/commenter/viewer
 
-### Done
-- [x] Starter landing page was cleaned up from the default template
-- [x] Frontend env example exists
-
 ## Person 2: Backend / Data
 
 **Ownership:** `backend/app/database.py`, `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/routers/documents.py`
 
 ### Todo
+
+### Done
+- [x] FastAPI project scaffold exists
+- [x] SQLite connection is set up
+- [x] Document CRUD endpoints exist
+- [x] Version listing endpoint exists
 - [x] Add local user model and seeded demo users
 - [x] Add auth or simple local identity flow for testing
 - [x] Add owner/editor/commenter/viewer permission checks
@@ -68,23 +74,11 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [x] Add version revert endpoint
 - [x] Add backend tests for CRUD, versions, and permissions
 
-### Done
-- [x] FastAPI project scaffold exists
-- [x] SQLite connection is set up
-- [x] Document CRUD endpoints exist
-- [x] Version listing endpoint exists
-
 ## Person 3: AI / Collaboration
 
 **Ownership:** `backend/app/services.py`, `backend/app/routers/ai.py`, `backend/app/realtime.py`
 
 ### Todo
-- [x] Improve LM Studio request handling and error messages
-- [x] Support real and mock AI flows cleanly
-- [x] Expand AI history filtering by document
-- [x] Improve WebSocket message structure
-- [x] Add presence state handling beyond simple broadcast messages
-- [x] Add tests for AI success, AI failure, and collaboration behavior
 
 ### Done
 - [x] LM Studio integration path exists
@@ -92,15 +86,21 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [x] AI invoke endpoint exists
 - [x] AI history endpoint exists
 - [x] Basic WebSocket collaboration room exists
+- [x] Improve LM Studio request handling and error messages
+- [x] Support real and mock AI flows cleanly
+- [x] Expand AI history filtering by document
+- [x] Improve WebSocket message structure
+- [x] Add presence state handling beyond simple broadcast messages
+- [x] Add tests for AI success, AI failure, and collaboration behavior
 - [x] LM Studio root URL and `/v1` URL formats are both supported
 - [x] WebSocket events use structured message types
 - [x] AI and collaboration backend tests exist
 
 ## Shared Milestones
 
-- [ ] Frontend can create and open documents from the backend
+- [x] Frontend can create and open documents from the backend
 - [ ] AI request works end-to-end with LM Studio
-- [ ] Local auth/role checks are enforced
+- [x] Local auth/role checks are enforced
 - [x] Two clients can join the same document room
 - [ ] Demo-ready local setup works from README only
 

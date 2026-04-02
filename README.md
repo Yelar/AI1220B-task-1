@@ -10,11 +10,11 @@ This submission contains:
 ## What This PoC Demonstrates
 
 - A working Next.js frontend connected to a FastAPI backend.
-- Local-first setup with SQLite and LM Studio for minimal instructor setup friction.
+- Local-first setup with SQLite and LM Studio, with optional mock AI mode for local testing.
 - Document creation, editing, saving, and deletion.
 - Role-based access behavior using local demo users.
 - Version snapshot creation and version revert.
-- AI-assisted summarize and rewrite flows through LM Studio.
+- AI-assisted rewrite, summarize, translate, and restructure flows through LM Studio.
 - Basic collaboration signaling over WebSockets.
 
 ## What It Intentionally Does Not Implement Yet
@@ -37,9 +37,11 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-### 2. Start LM Studio
+### 2. Start LM Studio or enable mock mode
 
 Run LM Studio locally, enable the server, and set the base URL and model name in `backend/.env`.
+
+If you want to run the PoC without LM Studio first, set `LLM_MOCK=true` in `backend/.env`.
 
 ### 3. Start the frontend
 

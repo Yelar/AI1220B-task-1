@@ -19,12 +19,13 @@ Expected backend services:
 
 - Document dashboard with create, list, search, and open flows
 - Document editor page with title/content save flow
-- AI suggestion panel for rewrite, summarize, translate, and restructure requests
-- Version list and owner-only snapshot UI
-- Realtime connection status, activity feed, and reconnect handling
+- AI assistant panel for rewrite, summarize, translate, and restructure requests
+- Version list, snapshot creation, and owner-only revert controls
+- Sharing, permissions, and export actions
+- Realtime connection status, presence list, and reconnect handling
 - Role-aware owner, editor, commenter, and viewer UI modes
 
 ## Notes
 
-- The backend does not yet expose real auth, role enforcement, or version revert routes.
-- The frontend therefore models roles locally for demo purposes and disables unsupported actions with clear messaging.
+- The backend exposes local demo users, document permissions, version routes, export routes, and AI history routes.
+- The frontend still keeps a local role picker so the team can preview owner, editor, commenter, and viewer states quickly during the demo.
