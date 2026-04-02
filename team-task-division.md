@@ -16,19 +16,19 @@ Use this file as the shared working checklist for both humans and coding agents.
 ## Working Rules
 
 - [ ] Pull latest `main` before starting work
-- [ ] Create a new branch for each task
+- [x] Create a new branch for each task
 - [ ] Stay inside your owned area unless the team agreed on a cross-cutting change
-- [ ] Run the relevant checks before opening a PR
+- [x] Run the relevant checks before opening a PR
 - [ ] Open a PR with a short summary and test notes
 - [ ] Merge only after review and after checks pass
 - [ ] If architecture or API assumptions changed, update `report.md`
 
 ## PR Checklist
 
-- [ ] Branch name is short and descriptive
-- [ ] PR does one clear piece of work
-- [ ] No unrelated files were changed
-- [ ] Tests or manual checks were run
+- [x] Branch name is short and descriptive
+- [x] PR does one clear piece of work
+- [x] No unrelated files were changed
+- [x] Tests or manual checks were run
 - [ ] Reviewer can understand what changed from the PR description alone
 - [ ] Branch is up to date with `main`
 
@@ -45,12 +45,12 @@ Use this file as the shared working checklist for both humans and coding agents.
 **Ownership:** `frontend/`
 
 ### Todo
-- [ ] Replace the starter page with a real document dashboard
-- [ ] Create a document editor page
-- [ ] Add document create/list/open/update flows
-- [ ] Build the AI suggestion panel UI
-- [ ] Add presence and reconnecting UI states
-- [ ] Add role-aware UI states for owner/editor/commenter/viewer
+- [x] Replace the starter page with a real document dashboard
+- [x] Create a document editor page
+- [x] Add document create/list/open/update flows
+- [x] Build the AI suggestion panel UI
+- [x] Add presence and reconnecting UI states
+- [x] Add role-aware UI states for owner/editor/commenter/viewer
 
 ### Done
 - [x] Starter landing page was cleaned up from the default template
@@ -64,7 +64,7 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [ ] Add local user model and seeded demo users
 - [ ] Add auth or simple local identity flow for testing
 - [ ] Add owner/editor/commenter/viewer permission checks
-- [ ] Add version create endpoint
+- [x] Add version create endpoint
 - [ ] Add version revert endpoint
 - [ ] Add backend tests for CRUD, versions, and permissions
 
@@ -80,7 +80,7 @@ Use this file as the shared working checklist for both humans and coding agents.
 
 ### Todo
 - [ ] Improve LM Studio request handling and error messages
-- [ ] Support real and mock AI flows cleanly
+- [x] Support real and mock AI flows cleanly
 - [ ] Expand AI history filtering by document
 - [ ] Improve WebSocket message structure
 - [ ] Add presence state handling beyond simple broadcast messages
@@ -95,10 +95,10 @@ Use this file as the shared working checklist for both humans and coding agents.
 
 ## Shared Milestones
 
-- [ ] Frontend can create and open documents from the backend
+- [x] Frontend can create and open documents from the backend
 - [ ] AI request works end-to-end with LM Studio
 - [ ] Local auth/role checks are enforced
-- [ ] Two clients can join the same document room
+- [x] Two clients can join the same document room
 - [ ] Demo-ready local setup works from README only
 
 ## Definition of Done
