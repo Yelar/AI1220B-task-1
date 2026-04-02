@@ -237,6 +237,8 @@ graph TB
     style LM fill:#999,stroke:#666,color:#fff
 ```
 
+![Rendered Level 1 System Context Diagram](diagrams/rendered/c4-level-1-system-context.png)
+
 **Explanation:** The system depends on only one external runtime component for the PoC: LM Studio running locally. No external database service, cloud storage, or third-party identity provider is required for evaluation.
 
 ---
@@ -265,6 +267,8 @@ graph TB
     style Backend fill:#438dd5,stroke:#2e6295,color:#fff
     style DB fill:#f5a623,stroke:#c7841a,color:#fff
 ```
+
+![Rendered Level 2 Container Diagram](diagrams/rendered/c4-level-2-container.png)
 
 **Container responsibilities:**
 
@@ -312,6 +316,8 @@ graph TB
     WsGateway --> Repo
     Repo --> DB
 ```
+
+![Rendered Level 3 Backend Component Diagram](diagrams/rendered/c4-level-3-backend-components.png)
 
 **Component responsibilities:**
 
@@ -655,6 +661,8 @@ erDiagram
     Document ||--o{ AIInteraction : has
 ```
 
+![Rendered Data Model Diagram](diagrams/rendered/data-model-er.png)
+
 ### Data Model Decisions
 
 **Document representation**  
@@ -885,6 +893,8 @@ gantt
     Integration testing                       :m4b, 2026-04-21, 5d
     Final docs and demo prep                  :m4c, 2026-04-25, 3d
 ```
+
+![Rendered Project Timeline Diagram](diagrams/rendered/project-timeline.png)
 
 ### Milestone Acceptance Criteria
 
