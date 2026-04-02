@@ -45,12 +45,12 @@ Use this file as the shared working checklist for both humans and coding agents.
 **Ownership:** `frontend/`
 
 ### Todo
-- [ ] Replace the starter page with a real document dashboard
-- [ ] Create a document editor page
-- [ ] Add document create/list/open/update flows
-- [ ] Build the AI suggestion panel UI
-- [ ] Add presence and reconnecting UI states
-- [ ] Add role-aware UI states for owner/editor/commenter/viewer
+- [x] Replace the starter page with a real document dashboard
+- [x] Create a document editor page
+- [x] Add document create/list/open/update flows
+- [x] Build the AI suggestion panel UI
+- [x] Add presence and reconnecting UI states
+- [x] Add role-aware UI states for owner/editor/commenter/viewer
 
 ### Done
 - [x] Starter landing page was cleaned up from the default template
@@ -61,12 +61,12 @@ Use this file as the shared working checklist for both humans and coding agents.
 **Ownership:** `backend/app/database.py`, `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/routers/documents.py`
 
 ### Todo
-- [ ] Add local user model and seeded demo users
-- [ ] Add auth or simple local identity flow for testing
-- [ ] Add owner/editor/commenter/viewer permission checks
-- [ ] Add version create endpoint
-- [ ] Add version revert endpoint
-- [ ] Add backend tests for CRUD, versions, and permissions
+- [x] Add local user model and seeded demo users
+- [x] Add auth or simple local identity flow for testing
+- [x] Add owner/editor/commenter/viewer permission checks
+- [x] Add version create endpoint
+- [x] Add version revert endpoint
+- [x] Add backend tests for CRUD, versions, and permissions
 
 ### Done
 - [x] FastAPI project scaffold exists
