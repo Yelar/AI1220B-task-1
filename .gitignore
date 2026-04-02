@@ -5,3 +5,6 @@ backend/app/__pycache__/
 backend/app/routers/__pycache__/
 backend/tests/__pycache__/
 backend/.pytest_cache/
+__pycache__/
+*.pyc
+backend/data/*.db
