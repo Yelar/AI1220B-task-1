@@ -18,9 +18,23 @@ export type DocumentVersion = {
   created_at: string;
 };
 
+export type DocumentPermission = {
+  id: number;
+  document_id: number;
+  user_id: number;
+  role: UserRole;
+};
+
+export type DemoUser = {
+  id: number;
+  email: string;
+  name: string;
+};
+
 export type AIInteraction = {
   id: number;
   document_id: number | null;
+  user_id: number | null;
   feature: AIFeature;
   prompt_excerpt: string;
   response_text: string;
@@ -79,5 +93,13 @@ export function canUseAi(role: UserRole) {
 }
 
 export function canCreateVersions(role: UserRole) {
+  return role === "owner" || role === "editor";
+}
+
+export function canRevertVersions(role: UserRole) {
+  return role === "owner";
+}
+
+export function canManagePermissions(role: UserRole) {
   return role === "owner";
 }

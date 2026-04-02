@@ -2,6 +2,8 @@ import { API_BASE_URL } from "./config";
 import type {
   AIInteraction,
   AIInvokeResponse,
+  DemoUser,
+  DocumentPermission,
   DocumentRecord,
   DocumentVersion,
   HealthResponse,
@@ -57,6 +59,36 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
   return data as T;
 }
 
+async function downloadRequest(path: string): Promise<Blob> {
+  const identity = getDemoIdentityFromStoredRole();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      "X-User-Id": String(identity.userId),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const rawBody = await response.text();
+    let message = `Request failed with status ${response.status}.`;
+
+    if (rawBody) {
+      try {
+        const parsed = JSON.parse(rawBody) as ErrorShape;
+        if (typeof parsed.detail === "string") {
+          message = parsed.detail;
+        }
+      } catch {
+        message = rawBody;
+      }
+    }
+
+    throw new ApiError(message, response.status);
+  }
+
+  return response.blob();
+}
+
 export function getHealth() {
   return apiRequest<HealthResponse>("/health");
 }
@@ -99,8 +131,69 @@ export function listVersions(documentId: number) {
   return apiRequest<DocumentVersion[]>(`/documents/${documentId}/versions`);
 }
 
-export function listAiHistory() {
-  return apiRequest<AIInteraction[]>("/ai/history");
+export function createVersion(documentId: number, payload: { label?: string }) {
+  return apiRequest<DocumentVersion>(`/documents/${documentId}/versions`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function revertVersion(documentId: number, versionId: number) {
+  return apiRequest<DocumentRecord>(`/documents/${documentId}/versions/${versionId}/revert`, {
+    method: "POST",
+  });
+}
+
+export function listPermissions(documentId: number) {
+  return apiRequest<DocumentPermission[]>(`/documents/${documentId}/permissions`);
+}
+
+export function upsertPermission(
+  documentId: number,
+  payload: { user_id: number; role: "owner" | "editor" | "commenter" | "viewer" },
+) {
+  return apiRequest<DocumentPermission>(`/documents/${documentId}/permissions`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function deletePermission(documentId: number, userId: number) {
+  return apiRequest<void>(`/documents/${documentId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+export function exportDocument(documentId: number, format: "md" | "txt" | "json") {
+  return downloadRequest(`/documents/${documentId}/export?format=${format}`);
+}
+
+export function listUsers() {
+  return apiRequest<DemoUser[]>("/users");
+}
+
+export function getCurrentUser() {
+  return apiRequest<DemoUser>("/users/me");
+}
+
+export function listAiHistory(params?: {
+  document_id?: number;
+  feature?: "rewrite" | "summarize" | "translate" | "restructure";
+  limit?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params?.document_id !== undefined) {
+    search.set("document_id", String(params.document_id));
+  }
+  if (params?.feature) {
+    search.set("feature", params.feature);
+  }
+  if (params?.limit !== undefined) {
+    search.set("limit", String(params.limit));
+  }
+
+  const suffix = search.size ? `?${search.toString()}` : "";
+  return apiRequest<AIInteraction[]>(`/ai/history${suffix}`);
 }
 
 export function invokeAi(payload: {

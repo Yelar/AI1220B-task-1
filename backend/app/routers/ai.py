@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AIInteraction, Document, DocumentPermission
+from app.routers.documents import get_current_user, require_document_role
 from app.schemas import AIInteractionRead, AIInvokeRequest, AIInvokeResponse
 from app.services import generate_ai_suggestion
-from app.routers.documents import get_current_user
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -73,17 +73,28 @@ def list_history(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    statement = (
-        select(AIInteraction)
-        .where(AIInteraction.user_id == current_user.id)
-        .order_by(AIInteraction.created_at.desc())
-        .limit(limit)
-    )
+    statement = select(AIInteraction)
 
     if document_id is not None:
+        document = db.get(Document, document_id)
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found.",
+            )
+
+        require_document_role(
+            document,
+            current_user,
+            db,
+            {"owner", "editor", "commenter", "viewer"},
+        )
         statement = statement.where(AIInteraction.document_id == document_id)
+    else:
+        statement = statement.where(AIInteraction.user_id == current_user.id)
 
     if feature is not None:
         statement = statement.where(AIInteraction.feature == feature)
 
+    statement = statement.order_by(AIInteraction.created_at.desc()).limit(limit)
     return db.scalars(statement).all()

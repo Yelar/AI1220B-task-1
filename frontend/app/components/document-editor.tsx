@@ -12,8 +12,17 @@ import {
 
 import {
   ApiError,
+  createVersion,
+  deletePermission,
+  exportDocument,
   getDocument,
   invokeAi,
+  listAiHistory,
+  listPermissions,
+  listUsers,
+  listVersions,
+  revertVersion,
+  upsertPermission,
   updateDocument,
 } from "@/app/lib/api";
 import { WS_BASE_URL } from "@/app/lib/config";
@@ -26,21 +35,32 @@ import {
   writeStoredRole,
 } from "@/app/lib/ui";
 import {
+  canCreateVersions,
   canEdit,
+  canManagePermissions,
+  canRevertVersions,
   canUseAi,
   type AIFeature,
+  type AIInteraction,
+  type DemoUser,
+  type DocumentPermission,
   type DocumentRecord,
+  type DocumentVersion,
   type UserRole,
 } from "@/app/lib/types";
 import RolePicker from "./role-picker";
 
 type ConnectionStatus = "connecting" | "live" | "reconnecting" | "offline" | "error";
+type ShareRoleDraft = UserRole | "none";
 
 type PresenceActor = {
   id: string;
   label: string;
   role: UserRole;
   userId: number;
+  cursorFrom: number | null;
+  selectionFrom: number | null;
+  selectionTo: number | null;
 };
 
 type PresenceWire = {
@@ -166,7 +186,40 @@ function mapParticipant(participant: PresenceWire): PresenceActor {
     label: participant.userName,
     role,
     userId: Number(participant.userId),
+    cursorFrom: typeof participant.cursor?.from === "number" ? participant.cursor.from : null,
+    selectionFrom:
+      typeof participant.selection?.from === "number" ? participant.selection.from : null,
+    selectionTo: typeof participant.selection?.to === "number" ? participant.selection.to : null,
   };
+}
+
+function buildDownloadFilename(title: string, format: "md" | "txt" | "json") {
+  const stem = (title.trim() || "document")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-_]/g, "")
+    .replace(/^-+|-+$/g, "");
+  return `${stem || "document"}.${format}`;
+}
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function defaultShareDrafts(users: DemoUser[], permissions: DocumentPermission[]) {
+  const byUserId = new Map(permissions.map((permission) => [permission.user_id, permission.role]));
+
+  return users.reduce<Record<number, ShareRoleDraft>>((accumulator, user) => {
+    accumulator[user.id] = user.id === 1 ? "owner" : byUserId.get(user.id) ?? "none";
+    return accumulator;
+  }, {});
 }
 
 export default function DocumentEditor({ documentId }: { documentId: number }) {
@@ -192,6 +245,16 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [presence, setPresence] = useState<PresenceActor[]>([]);
   const [draftSignal, setDraftSignal] = useState(0);
   const [remoteDraftNotice, setRemoteDraftNotice] = useState<string | null>(null);
+  const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [permissions, setPermissions] = useState<DocumentPermission[]>([]);
+  const [users, setUsers] = useState<DemoUser[]>([]);
+  const [shareDrafts, setShareDrafts] = useState<Record<number, ShareRoleDraft>>({});
+  const [aiHistory, setAiHistory] = useState<AIInteraction[]>([]);
+  const [versionLabel, setVersionLabel] = useState("");
+  const [sidebarBusy, setSidebarBusy] = useState<string | null>(null);
+  const [sidebarMessage, setSidebarMessage] = useState<string | null>(null);
+  const [sidebarError, setSidebarError] = useState<string | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<"md" | "txt" | "json" | null>(null);
 
   const clientIdRef = useRef(`client-${Math.random().toString(36).slice(2, 10)}`);
   const socketRef = useRef<WebSocket | null>(null);
@@ -209,6 +272,50 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     writeStoredRole(role);
   }, [role]);
 
+  async function refreshWorkspaceData(currentDocumentId: number, nextRole: UserRole = role) {
+    const requests: Array<Promise<unknown>> = [
+      listVersions(currentDocumentId),
+      listAiHistory({ document_id: currentDocumentId, limit: 12 }),
+    ];
+
+    if (canManagePermissions(nextRole)) {
+      requests.push(listPermissions(currentDocumentId), listUsers());
+    }
+
+    const results = await Promise.allSettled(requests);
+
+    const [versionsResult, historyResult, permissionsResult, usersResult] = results;
+
+    if (versionsResult?.status === "fulfilled") {
+      setVersions(versionsResult.value as DocumentVersion[]);
+    }
+
+    if (historyResult?.status === "fulfilled") {
+      setAiHistory(historyResult.value as AIInteraction[]);
+    }
+
+    if (canManagePermissions(nextRole)) {
+      if (permissionsResult?.status === "fulfilled") {
+        const nextPermissions = permissionsResult.value as DocumentPermission[];
+        setPermissions(nextPermissions);
+
+        if (usersResult?.status === "fulfilled") {
+          const nextUsers = usersResult.value as DemoUser[];
+          setUsers(nextUsers);
+          setShareDrafts(defaultShareDrafts(nextUsers, nextPermissions));
+        }
+      } else {
+        setPermissions([]);
+        setUsers([]);
+        setShareDrafts({});
+      }
+    } else {
+      setPermissions([]);
+      setUsers([]);
+      setShareDrafts({});
+    }
+  }
+
   useEffect(() => {
     if (!Number.isFinite(documentId) || documentId <= 0) {
       setError("Invalid document id.");
@@ -222,6 +329,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setPresence([]);
       setAiResult("");
       setAiError(null);
+      setSidebarMessage(null);
+      setSidebarError(null);
 
       try {
         const currentDocument = await getDocument(documentId);
@@ -229,6 +338,47 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         setTitle(currentDocument.title);
         setContent(currentDocument.content);
         setDirty(false);
+
+        const requests: Array<Promise<unknown>> = [
+          listVersions(currentDocument.id),
+          listAiHistory({ document_id: currentDocument.id, limit: 12 }),
+        ];
+
+        if (canManagePermissions(role)) {
+          requests.push(listPermissions(currentDocument.id), listUsers());
+        }
+
+        const results = await Promise.allSettled(requests);
+        const [versionsResult, historyResult, permissionsResult, usersResult] = results;
+
+        if (versionsResult?.status === "fulfilled") {
+          setVersions(versionsResult.value as DocumentVersion[]);
+        }
+
+        if (historyResult?.status === "fulfilled") {
+          setAiHistory(historyResult.value as AIInteraction[]);
+        }
+
+        if (canManagePermissions(role)) {
+          if (permissionsResult?.status === "fulfilled") {
+            const nextPermissions = permissionsResult.value as DocumentPermission[];
+            setPermissions(nextPermissions);
+
+            if (usersResult?.status === "fulfilled") {
+              const nextUsers = usersResult.value as DemoUser[];
+              setUsers(nextUsers);
+              setShareDrafts(defaultShareDrafts(nextUsers, nextPermissions));
+            }
+          } else {
+            setPermissions([]);
+            setUsers([]);
+            setShareDrafts({});
+          }
+        } else {
+          setPermissions([]);
+          setUsers([]);
+          setShareDrafts({});
+        }
       } catch (requestError) {
         const message =
           requestError instanceof Error ? requestError.message : "Failed to load document.";
@@ -239,7 +389,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
 
     void run();
-  }, [documentId]);
+  }, [documentId, role]);
 
   function broadcastDocumentUpdate(payload: DocumentUpdatePayload) {
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
@@ -425,6 +575,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setContent(savedDocument.content);
       setDirty(false);
       setSaveMessage(`Saved at ${formatTimestamp(savedDocument.updated_at)}.`);
+      await refreshWorkspaceData(savedDocument.id);
     } catch (requestError) {
       const message =
         requestError instanceof Error ? requestError.message : "Failed to save document.";
@@ -458,6 +609,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
       setAiResult(response.output_text);
       setSaveMessage("AI suggestion ready for review.");
+      await refreshWorkspaceData(document.id);
     } catch (requestError) {
       const message =
         requestError instanceof ApiError
@@ -494,12 +646,121 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setAiPanelOpen(true);
   }
 
+  async function handleCreateVersion() {
+    if (!document || !canCreateVersions(role)) {
+      return;
+    }
+
+    setSidebarBusy("version:create");
+    setSidebarError(null);
+    setSidebarMessage(null);
+
+    try {
+      const createdVersion = await createVersion(document.id, {
+        label: versionLabel.trim() || undefined,
+      });
+      setVersions((current) => [createdVersion, ...current]);
+      setVersionLabel("");
+      setSidebarMessage(`Saved version "${createdVersion.label ?? "Manual version"}".`);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to create a version.";
+      setSidebarError(message);
+    } finally {
+      setSidebarBusy(null);
+    }
+  }
+
+  async function handleRevertVersion(versionId: number) {
+    if (!document || !canRevertVersions(role)) {
+      return;
+    }
+
+    setSidebarBusy(`version:${versionId}`);
+    setSidebarError(null);
+    setSidebarMessage(null);
+
+    try {
+      const revertedDocument = await revertVersion(document.id, versionId);
+      setDocument(revertedDocument);
+      setTitle(revertedDocument.title);
+      setContent(revertedDocument.content);
+      setDirty(false);
+      setSaveMessage(`Reverted to version ${versionId}.`);
+      await refreshWorkspaceData(revertedDocument.id);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to revert the document.";
+      setSidebarError(message);
+    } finally {
+      setSidebarBusy(null);
+    }
+  }
+
+  async function handleExport(format: "md" | "txt" | "json") {
+    if (!document) {
+      return;
+    }
+
+    setExportingFormat(format);
+    setSidebarError(null);
+    setSidebarMessage(null);
+
+    try {
+      const blob = await exportDocument(document.id, format);
+      saveBlob(blob, buildDownloadFilename(title || document.title, format));
+      setSidebarMessage(`Downloaded ${format.toUpperCase()} export.`);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to export the document.";
+      setSidebarError(message);
+    } finally {
+      setExportingFormat(null);
+    }
+  }
+
+  async function handleSavePermission(userId: number) {
+    if (!document || !canManagePermissions(role)) {
+      return;
+    }
+
+    const draftRole = shareDrafts[userId];
+    if (!draftRole || userId === 1) {
+      return;
+    }
+
+    setSidebarBusy(`permission:${userId}`);
+    setSidebarError(null);
+    setSidebarMessage(null);
+
+    try {
+      if (draftRole === "none") {
+        const existingPermission = permissions.find((permission) => permission.user_id === userId);
+        if (existingPermission) {
+          await deletePermission(document.id, userId);
+        }
+      } else {
+        await upsertPermission(document.id, { user_id: userId, role: draftRole });
+      }
+
+      await refreshWorkspaceData(document.id);
+      setSidebarMessage("Sharing settings updated.");
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to update sharing.";
+      setSidebarError(message);
+    } finally {
+      setSidebarBusy(null);
+    }
+  }
+
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   const lastUpdated = document ? formatTimestamp(document.updated_at) : "Unavailable";
   const saveStateLabel = saving ? "Saving..." : dirty ? "Unsaved changes" : "All changes saved";
   const selectedTextPreview = selectedText.trim()
     ? getExcerpt(selectedText.trim(), 110)
     : "Highlight text in the page to send it to the AI panel.";
+  const currentSelectionLength = Math.max(0, selectionEnd - selectionStart);
 
   if (loading) {
     return (
@@ -586,7 +847,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
           <div className="soft-panel flex flex-wrap items-center gap-3 rounded-[1.6rem] px-4 py-3">
             <span className="pill border-0 bg-white text-slate-700">{wordCount} words</span>
-            <span className="pill border-0 bg-white text-slate-700">{selectedText.length} selected</span>
+            <span className="pill border-0 bg-white text-slate-700">{currentSelectionLength} selected</span>
             <span className="pill border-0 bg-white text-slate-700">
               {canUseAi(role) ? "AI available" : "AI disabled"}
             </span>
@@ -607,6 +868,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
             {remoteDraftNotice ? <div className="notice notice-info">{remoteDraftNotice}</div> : null}
             {saveMessage ? <div className="notice notice-success">{saveMessage}</div> : null}
+            {sidebarMessage ? <div className="notice notice-success">{sidebarMessage}</div> : null}
+            {sidebarError ? <div className="notice notice-error">{sidebarError}</div> : null}
             {error ? <div className="notice notice-error">{error}</div> : null}
           </div>
 
@@ -669,7 +932,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 >
                   <div>
                     <div className="text-sm font-medium text-slate-900">{person.label}</div>
-                    <div className="text-xs text-slate-500">Live in the room</div>
+                    <div className="text-xs text-slate-500">
+                      {person.selectionFrom !== null && person.selectionTo !== null
+                        ? `Selecting ${person.selectionFrom}-${person.selectionTo}`
+                        : person.cursorFrom !== null
+                          ? `Cursor at ${person.cursorFrom}`
+                          : "Live in the room"}
+                    </div>
                   </div>
                   <span className="pill border-0 bg-slate-100 text-slate-700">{person.role}</span>
                 </div>
@@ -679,6 +948,193 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   Waiting for presence updates from the collaboration room.
                 </p>
               ) : null}
+            </div>
+          </section>
+
+          <section className="surface-card rounded-[1.8rem] p-5">
+            <div>
+              <p className="text-lg font-semibold text-slate-900">Versions</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Save checkpoints and restore an earlier state when needed.
+              </p>
+            </div>
+
+            {canCreateVersions(role) ? (
+              <div className="mt-4 space-y-3">
+                <input
+                  value={versionLabel}
+                  onChange={(event) => setVersionLabel(event.target.value)}
+                  className="field"
+                  placeholder="Checkpoint label"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleCreateVersion()}
+                  disabled={sidebarBusy === "version:create"}
+                  className="button-secondary h-11 w-full rounded-full"
+                >
+                  {sidebarBusy === "version:create" ? "Saving version..." : "Save version snapshot"}
+                </button>
+              </div>
+            ) : null}
+
+            <div className="mt-4 space-y-3">
+              {versions.map((version) => (
+                <div
+                  key={version.id}
+                  className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {version.label || `Version ${version.id}`}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{formatTimestamp(version.created_at)}</p>
+                    </div>
+                    {canRevertVersions(role) ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleRevertVersion(version.id)}
+                        disabled={sidebarBusy === `version:${version.id}`}
+                        className="button-subtle rounded-full px-3 py-2 text-sm"
+                      >
+                        {sidebarBusy === `version:${version.id}` ? "Reverting..." : "Revert"}
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    {getExcerpt(version.content, 120)}
+                  </p>
+                </div>
+              ))}
+
+              {versions.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  No saved versions yet. Create one before large rewrites or reverts.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="surface-card rounded-[1.8rem] p-5">
+            <div>
+              <p className="text-lg font-semibold text-slate-900">AI history</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Review the recent suggestions generated for this document.
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {aiHistory.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="pill border-0 bg-slate-100 text-slate-700">{entry.feature}</span>
+                    <span className="text-xs text-slate-500">{formatTimestamp(entry.created_at)}</span>
+                  </div>
+                  <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-400">Prompt excerpt</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {getExcerpt(entry.prompt_excerpt, 110)}
+                  </p>
+                  <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-400">Output</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    {getExcerpt(entry.response_text, 130)}
+                  </p>
+                </div>
+              ))}
+
+              {aiHistory.length === 0 ? (
+                <p className="text-sm leading-6 text-slate-500">
+                  No AI actions have been recorded for this document yet.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          {canManagePermissions(role) ? (
+            <section className="surface-card rounded-[1.8rem] p-5">
+              <div>
+                <p className="text-lg font-semibold text-slate-900">Sharing</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Manage demo-user access levels for the local proof of concept.
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {users.map((user) => (
+                  <div
+                    key={user.id}
+                    className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{user.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">{user.email}</p>
+                      </div>
+                      <span className="pill border-0 bg-slate-100 text-slate-700">
+                        {user.id === 1
+                          ? "owner"
+                          : permissions.find((permission) => permission.user_id === user.id)?.role ?? "no access"}
+                      </span>
+                    </div>
+
+                    {user.id === 1 ? (
+                      <p className="mt-3 text-sm text-slate-500">The owner role is fixed for this document.</p>
+                    ) : (
+                      <div className="mt-3 flex items-center gap-3">
+                        <select
+                          value={shareDrafts[user.id] ?? "none"}
+                          onChange={(event) =>
+                            setShareDrafts((current) => ({
+                              ...current,
+                              [user.id]: event.target.value as ShareRoleDraft,
+                            }))
+                          }
+                          className="field-select"
+                        >
+                          <option value="none">No access</option>
+                          <option value="viewer">Viewer</option>
+                          <option value="commenter">Commenter</option>
+                          <option value="editor">Editor</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void handleSavePermission(user.id)}
+                          disabled={sidebarBusy === `permission:${user.id}`}
+                          className="button-secondary shrink-0 rounded-full px-4 py-2"
+                        >
+                          {sidebarBusy === `permission:${user.id}` ? "Saving..." : "Apply"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="surface-card rounded-[1.8rem] p-5">
+            <div>
+              <p className="text-lg font-semibold text-slate-900">Export</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Download the current document in common local formats.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {(["md", "txt", "json"] as const).map((format) => (
+                <button
+                  key={format}
+                  type="button"
+                  onClick={() => void handleExport(format)}
+                  disabled={exportingFormat === format}
+                  className="button-secondary h-11 rounded-full px-4"
+                >
+                  {exportingFormat === format ? "Preparing..." : format.toUpperCase()}
+                </button>
+              ))}
             </div>
           </section>
 
