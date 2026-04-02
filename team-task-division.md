@@ -79,12 +79,12 @@ Use this file as the shared working checklist for both humans and coding agents.
 **Ownership:** `backend/app/services.py`, `backend/app/routers/ai.py`, `backend/app/realtime.py`
 
 ### Todo
-- [ ] Improve LM Studio request handling and error messages
-- [ ] Support real and mock AI flows cleanly
-- [ ] Expand AI history filtering by document
-- [ ] Improve WebSocket message structure
-- [ ] Add presence state handling beyond simple broadcast messages
-- [ ] Add tests for AI success, AI failure, and collaboration behavior
+- [x] Improve LM Studio request handling and error messages
+- [x] Support real and mock AI flows cleanly
+- [x] Expand AI history filtering by document
+- [x] Improve WebSocket message structure
+- [x] Add presence state handling beyond simple broadcast messages
+- [x] Add tests for AI success, AI failure, and collaboration behavior
 
 ### Done
 - [x] LM Studio integration path exists
@@ -92,13 +92,16 @@ Use this file as the shared working checklist for both humans and coding agents.
 - [x] AI invoke endpoint exists
 - [x] AI history endpoint exists
 - [x] Basic WebSocket collaboration room exists
+- [x] LM Studio root URL and `/v1` URL formats are both supported
+- [x] WebSocket events use structured message types
+- [x] AI and collaboration backend tests exist
 
 ## Shared Milestones
 
 - [ ] Frontend can create and open documents from the backend
 - [ ] AI request works end-to-end with LM Studio
 - [ ] Local auth/role checks are enforced
-- [ ] Two clients can join the same document room
+- [x] Two clients can join the same document room
 - [ ] Demo-ready local setup works from README only
 
 ## Definition of Done

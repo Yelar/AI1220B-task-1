@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     database_url: str = "sqlite:///./data/app.db"
     frontend_origin: str = "http://localhost:3000"
-    lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
+    lm_studio_base_url: str = "http://127.0.0.1:1234"
     lm_studio_model: str = "local-model"
     lm_studio_timeout_seconds: float = 60.0
     llm_mock: bool = False

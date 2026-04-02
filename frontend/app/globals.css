@@ -1,22 +1,246 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f1e8;
-  --foreground: #111827;
+  --background: #f4f1ea;
+  --foreground: #1b2430;
+  --muted: #667283;
+  --line: #d9d5cc;
+  --blue: #315e8a;
+  --blue-strong: #23496b;
+  --blue-soft: #e7eef5;
+  --success-bg: #ebf5ef;
+  --success-text: #2d6a4f;
+  --warn-bg: #fdf2df;
+  --warn-text: #9c5b16;
+  --error-bg: #f9e8e4;
+  --error-text: #9f3d2b;
+  --font-display:
+    "Avenir Next", "Avenir", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at top left, rgba(49, 94, 138, 0.05), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(108, 133, 163, 0.05), transparent 20%),
+    linear-gradient(180deg, #f7f4ee, #f3f0e8);
   color: var(--foreground);
-  background-image:
-    radial-gradient(circle at top left, rgba(251, 191, 36, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.16), transparent 24%);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-display), Arial, sans-serif;
+}
+
+* {
+  border-color: var(--line);
+}
+
+::selection {
+  background: rgba(49, 94, 138, 0.16);
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(49, 94, 138, 0.28);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  position: relative;
+}
+
+.surface-card {
+  background: rgba(255, 253, 249, 0.9);
+  box-shadow:
+    0 14px 32px rgba(24, 38, 52, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.soft-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.92), rgba(251, 248, 242, 0.94)),
+    radial-gradient(circle at top right, rgba(49, 94, 138, 0.05), transparent 34%);
+  box-shadow:
+    0 12px 30px rgba(24, 38, 52, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.canvas-panel {
+  background:
+    linear-gradient(180deg, rgba(245, 241, 233, 0.88), rgba(240, 236, 228, 0.9)),
+    radial-gradient(circle at top, rgba(49, 94, 138, 0.05), transparent 28%);
+}
+
+.section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field,
+.field-area,
+.field-select {
+  width: 100%;
+  border: 1px solid rgba(27, 36, 48, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--foreground);
+}
+
+.field,
+.field-select {
+  min-height: 3rem;
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  font-size: 0.97rem;
+}
+
+.field-area {
+  border-radius: 1.2rem;
+  padding: 1rem 1.05rem;
+  font-size: 0.97rem;
+  line-height: 1.75;
+}
+
+.field:hover,
+.field-area:hover,
+.field-select:hover {
+  border-color: rgba(49, 94, 138, 0.22);
+}
+
+.field:focus,
+.field-area:focus,
+.field-select:focus {
+  border-color: rgba(49, 94, 138, 0.35);
+  box-shadow: 0 0 0 4px rgba(49, 94, 138, 0.08);
+  outline: none;
+}
+
+.field::placeholder,
+.field-area::placeholder {
+  color: #7e8896;
+}
+
+.button-primary,
+.button-secondary,
+.button-subtle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.button-primary {
+  background: #1f2e3d;
+  color: white;
+  box-shadow: 0 10px 22px rgba(24, 38, 52, 0.18);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: #172432;
+}
+
+.button-secondary {
+  border: 1px solid rgba(27, 36, 48, 0.12);
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--foreground);
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.button-subtle {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--foreground);
+}
+
+.button-primary:disabled,
+.button-secondary:disabled,
+.button-subtle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(27, 36, 48, 0.1);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--foreground);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.notice {
+  border-radius: 1.2rem;
+  padding: 0.95rem 1rem;
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.notice-info {
+  background: var(--blue-soft);
+  color: var(--blue-strong);
+}
+
+.notice-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.notice-warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.notice-error {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.template-preview-sheet {
+  position: relative;
+}
+
+.template-preview-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
