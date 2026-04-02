@@ -4,8 +4,25 @@ This submission contains:
 
 - `frontend/`: Next.js document dashboard and editor UI.
 - `backend/`: FastAPI backend with local SQLite persistence, role checks, versioning, collaboration, and LM Studio integration.
-- `diagrams/`: editable Mermaid C4 diagram source files used in the report.
-- `report.md`, `meeting_log.md`, `team-task-division.md`: supporting assignment documentation.
+- `diagrams/`: editable Mermaid source files used in the report.
+- `report.pdf`, `meeting_log.md`, `team-task-division.md`: supporting assignment documentation.
+
+## What This PoC Demonstrates
+
+- A working Next.js frontend connected to a FastAPI backend.
+- Local-first setup with SQLite and LM Studio for minimal instructor setup friction.
+- Document creation, editing, saving, and deletion.
+- Role-based access behavior using local demo users.
+- Version snapshot creation and version revert.
+- AI-assisted summarize and rewrite flows through LM Studio.
+- Basic collaboration signaling over WebSockets.
+
+## What It Intentionally Does Not Implement Yet
+
+- Production-grade authentication such as passwords, OAuth, or JWT sessions.
+- Full operational-transform or CRDT-based collaborative editing.
+- Production deployment infrastructure or cloud-hosted services.
+- Comprehensive frontend automated tests.
 
 ## Local setup
 
@@ -35,6 +52,13 @@ npm run dev
 
 Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000`.
 
+## Deliverables Included
+
+- Running source code in `frontend/` and `backend/`
+- Final written report as `report.pdf`
+- Editable Mermaid architecture and data-model diagrams in `diagrams/`
+- Team process notes in `meeting_log.md` and `team-task-division.md`
+
 ## API Surface
 
 - `GET /api/health`
@@ -55,3 +79,9 @@ Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000
 - `GET /api/users`
 - `GET /api/users/me`
 - `WS /ws/documents/{document_id}`
+
+## Troubleshooting
+
+- If AI responses do not work, verify LM Studio is running and the model name in `backend/.env` matches the loaded model.
+- If the frontend cannot reach the backend, confirm the frontend uses `http://127.0.0.1:8000` and the backend is started before `npm run dev`.
+- If local testing behaves inconsistently, remove the local SQLite file under `backend/data/` and restart the backend to rebuild it.
