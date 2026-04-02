@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import ensure_local_schema, seed_demo_users
 from app.realtime import manager
-from app.routers import ai, documents
+from app.routers import ai, documents, users
 from app.schemas import HealthResponse
 
 ensure_local_schema()
@@ -37,6 +37,7 @@ app.add_middleware(
 
 app.include_router(documents.router, prefix=settings.api_prefix)
 app.include_router(ai.router, prefix=settings.api_prefix)
+app.include_router(users.router, prefix=settings.api_prefix)
 
 
 @app.get("/", response_model=HealthResponse)

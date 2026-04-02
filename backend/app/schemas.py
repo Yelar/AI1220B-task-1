@@ -87,6 +87,7 @@ class AIInvokeResponse(BaseModel):
 class AIInteractionRead(BaseModel):
     id: int
     document_id: int | None
+    user_id: int | None
     feature: str
     prompt_excerpt: str
     response_text: str

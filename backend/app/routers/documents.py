@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -56,6 +57,15 @@ def require_document_role(
             detail="You do not have permission to perform this action.",
         )
     return role
+
+
+def safe_export_filename(title: str, export_format: str) -> str:
+    collapsed = "-".join(title.lower().split()) or "document"
+    sanitized = "".join(
+        character for character in collapsed if character.isalnum() or character in {"-", "_"}
+    ).strip("-_")
+    stem = sanitized or "document"
+    return f"{stem}.{export_format}"
 
 
 @router.get("", response_model=list[DocumentRead])
@@ -129,6 +139,56 @@ def get_document(
         {"owner", "editor", "commenter", "viewer"},
     )
     return document
+
+
+@router.get("/{document_id}/export")
+def export_document(
+    document_id: int,
+    format: str = Query(default="md"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    require_document_role(
+        document,
+        current_user,
+        db,
+        {"owner", "editor", "commenter", "viewer"},
+    )
+
+    export_format = format.lower().strip()
+    if export_format not in {"txt", "md", "json"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported export format. Use txt, md, or json.",
+        )
+
+    filename = safe_export_filename(document.title, export_format)
+
+    if export_format == "json":
+        payload = {
+            "id": document.id,
+            "title": document.title,
+            "content": document.content,
+            "created_at": document.created_at.isoformat(),
+            "updated_at": document.updated_at.isoformat(),
+        }
+        return JSONResponse(
+            payload,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    body = document.content if export_format == "txt" else f"# {document.title}\n\n{document.content}"
+    return PlainTextResponse(
+        body,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.patch("/{document_id}", response_model=DocumentRead)
