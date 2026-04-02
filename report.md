@@ -519,6 +519,7 @@ swe-task1/
 ├── instructions.md
 ├── report.md
 ├── team-task-division.md
+├── meeting_log.md
 └── AI1220B-task-1/
     ├── README.md
     ├── frontend/
@@ -536,6 +537,10 @@ swe-task1/
         │   ├── services.py
         │   ├── realtime.py
         │   └── routers/
+        │       ├── documents.py
+        │       └── ai.py
+        ├── tests/
+        │   └── test_documents.py
         ├── data/
         ├── requirements.txt
         ├── .env.example
