@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import AIInteraction, Document, DocumentVersion, User
-from app.services import build_lm_studio_chat_url
+from app.services import build_lm_studio_chat_url, sanitize_model_output
 
 
 TEST_DATABASE_URL = "sqlite://"
@@ -73,14 +73,15 @@ class BackendAITestCase(unittest.TestCase):
             db.commit()
 
     def test_ai_invoke_returns_mock_metadata(self):
-        response = self.client.post(
-            "/api/ai/invoke",
-            json={
-                "feature": "summarize",
-                "selected_text": "Mock metadata test paragraph.",
-            },
-            headers=auth_headers(),
-        )
+        with patch("app.services.settings.llm_mock", True):
+            response = self.client.post(
+                "/api/ai/invoke",
+                json={
+                    "feature": "summarize",
+                    "selected_text": "Mock metadata test paragraph.",
+                },
+                headers=auth_headers(),
+            )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -206,6 +207,20 @@ class BackendAITestCase(unittest.TestCase):
                 build_lm_studio_chat_url(),
                 "http://127.0.0.1:1234/v1/chat/completions",
             )
+
+    def test_sanitize_model_output_strips_common_wrappers(self):
+        self.assertEqual(
+            sanitize_model_output("Here is your rewritten text: A cleaner sentence."),
+            "A cleaner sentence.",
+        )
+        self.assertEqual(
+            sanitize_model_output("Concise summary of the selected text:\n\nShort summary."),
+            "Short summary.",
+        )
+        self.assertEqual(
+            sanitize_model_output("```text\nTranslated paragraph.\n```"),
+            "Translated paragraph.",
+        )
 
         with patch(
             "app.services.settings.lm_studio_base_url",

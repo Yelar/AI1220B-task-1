@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 from textwrap import shorten
 
 import httpx
@@ -15,6 +16,16 @@ class AIResult:
     model_name: str
     provider: str
     mocked: bool
+
+
+LEADING_WRAPPER_PATTERNS = [
+    r"^(?:here(?:'s| is)\s+(?:your|the)\s+(?:rewritten|revised|translated|restructured|summarized)\s+text\s*:\s*)",
+    r"^(?:here(?:'s| is)\s+(?:a|the)\s+summary\s*:\s*)",
+    r"^(?:rewritten|revised|translated|restructured|summarized)\s+text\s*:\s*",
+    r"^(?:summary|translation|rewrite|restructured\s+version|restructure)\s*:\s*",
+    r"^(?:concise\s+summary\s+of\s+the\s+selected\s+text\s*:\s*)",
+    r"^(?:result|output)\s*:\s*",
+]
 
 
 def build_prompt(payload: AIInvokeRequest) -> str:
@@ -43,6 +54,42 @@ def build_lm_studio_chat_url() -> str:
     return f"{base_url}/v1/chat/completions"
 
 
+def sanitize_model_output(content: str) -> str:
+    cleaned = content.strip()
+
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 3:
+            cleaned = "\n".join(lines[1:-1]).strip()
+
+    cleaned = cleaned.strip().strip('"').strip("'").strip()
+
+    changed = True
+    while changed:
+        changed = False
+        for pattern in LEADING_WRAPPER_PATTERNS:
+            updated = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
+            if updated != cleaned:
+                cleaned = updated
+                changed = True
+
+    if "\n\n" in cleaned:
+        first_line, remainder = cleaned.split("\n\n", 1)
+        lowered = first_line.strip().lower()
+        if (
+            lowered.endswith(":")
+            or lowered.startswith("here is")
+            or lowered.startswith("here's")
+            or lowered.startswith("summary")
+            or lowered.startswith("translation")
+            or lowered.startswith("rewrite")
+            or lowered.startswith("result")
+        ):
+            cleaned = remainder.strip()
+
+    return cleaned.strip()
+
+
 async def generate_ai_suggestion(payload: AIInvokeRequest) -> AIResult:
     prompt = build_prompt(payload)
 
@@ -64,7 +111,11 @@ async def generate_ai_suggestion(payload: AIInvokeRequest) -> AIResult:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a helpful writing assistant for a collaborative editor.",
+                "content": (
+                    "You are a writing assistant for a collaborative editor. "
+                    "Return only the requested resulting text. "
+                    "Do not add introductions, labels, explanations, quotation marks, bullet points, or markdown fences."
+                ),
             },
             {"role": "user", "content": prompt},
         ],
@@ -123,6 +174,7 @@ async def generate_ai_suggestion(payload: AIInvokeRequest) -> AIResult:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LM Studio returned an unexpected response payload.",
         ) from exc
+    content = sanitize_model_output(content)
     if not content:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
