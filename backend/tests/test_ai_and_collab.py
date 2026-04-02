@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import AIInteraction, Document, DocumentVersion, User
+from app.models import AIInteraction, Document, DocumentPermission, DocumentVersion, User
 from app.services import build_lm_studio_chat_url, sanitize_model_output
 
 
@@ -130,6 +130,39 @@ class BackendAITestCase(unittest.TestCase):
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["document_id"], first_doc["id"])
         self.assertEqual(payload[0]["feature"], "summarize")
+
+    def test_document_history_can_include_other_users_with_access(self):
+        document = self.client.post(
+            "/api/documents",
+            json={"title": "Shared history", "content": "Body"},
+            headers=auth_headers(1),
+        ).json()
+
+        with TestingSessionLocal() as db:
+            db.add(DocumentPermission(document_id=document["id"], user_id=2, role="editor"))
+            db.commit()
+
+        with patch("app.services.settings.llm_mock", True):
+            self.client.post(
+                "/api/ai/invoke",
+                json={
+                    "feature": "rewrite",
+                    "selected_text": "Beta",
+                    "document_id": document["id"],
+                },
+                headers=auth_headers(2),
+            )
+
+        response = self.client.get(
+            f"/api/ai/history?document_id={document['id']}",
+            headers=auth_headers(1),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["user_id"], 2)
+        self.assertEqual(payload[0]["feature"], "rewrite")
 
     def test_ai_invoke_surfaces_generation_failure(self):
         with patch(

@@ -181,3 +181,37 @@ def test_owner_can_manage_permissions():
         headers=auth_headers(1),
     )
     assert remove.status_code == 204
+
+
+def test_list_users_and_current_user():
+    users = client.get("/api/users", headers=auth_headers(1))
+    assert users.status_code == 200
+    assert len(users.json()) == 4
+
+    current_user = client.get("/api/users/me", headers=auth_headers(2))
+    assert current_user.status_code == 200
+    assert current_user.json()["email"] == "editor@example.com"
+
+
+def test_export_document_formats():
+    created = client.post(
+        "/api/documents",
+        json={"title": "Export Me", "content": "Hello export", "save_initial_version": True},
+        headers=auth_headers(1),
+    )
+    document_id = created.json()["id"]
+
+    markdown_export = client.get(
+        f"/api/documents/{document_id}/export?format=md",
+        headers=auth_headers(1),
+    )
+    assert markdown_export.status_code == 200
+    assert markdown_export.text == "# Export Me\n\nHello export"
+    assert "attachment; filename=\"export-me.md\"" in markdown_export.headers["content-disposition"]
+
+    json_export = client.get(
+        f"/api/documents/{document_id}/export?format=json",
+        headers=auth_headers(1),
+    )
+    assert json_export.status_code == 200
+    assert json_export.json()["title"] == "Export Me"
