@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -43,15 +43,14 @@ async def invoke_ai(
                 detail="Only owners and editors can invoke AI for this document.",
             )
 
-    prompt, output_text, model_name = await generate_ai_suggestion(payload)
-
+    result = await generate_ai_suggestion(payload)
     interaction = AIInteraction(
         document_id=payload.document_id,
         user_id=current_user.id,
         feature=payload.feature,
-        prompt_excerpt=prompt,
-        response_text=output_text,
-        model_name=model_name,
+        prompt_excerpt=result.prompt,
+        response_text=result.output_text,
+        model_name=result.model_name,
         status="completed",
     )
     db.add(interaction)
@@ -59,13 +58,18 @@ async def invoke_ai(
 
     return AIInvokeResponse(
         feature=payload.feature,
-        output_text=output_text,
-        model_name=model_name,
+        output_text=result.output_text,
+        model_name=result.model_name,
+        provider=result.provider,
+        mocked=result.mocked,
     )
 
 
 @router.get("/history", response_model=list[AIInteractionRead])
 def list_history(
+    document_id: int | None = Query(default=None),
+    feature: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -73,5 +77,13 @@ def list_history(
         select(AIInteraction)
         .where(AIInteraction.user_id == current_user.id)
         .order_by(AIInteraction.created_at.desc())
+        .limit(limit)
     )
+
+    if document_id is not None:
+        statement = statement.where(AIInteraction.document_id == document_id)
+
+    if feature is not None:
+        statement = statement.where(AIInteraction.feature == feature)
+
     return db.scalars(statement).all()

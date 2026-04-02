@@ -81,6 +81,7 @@ class AIInvokeResponse(BaseModel):
     model_name: str
     provider: str = "lm-studio"
     status: str = "completed"
+    mocked: bool = False
 
 
 class AIInteractionRead(BaseModel):
