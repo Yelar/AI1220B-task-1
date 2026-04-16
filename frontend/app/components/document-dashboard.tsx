@@ -10,15 +10,13 @@ import {
   type FormEvent,
 } from "react";
 
-import { ApiError, createDocument, getHealth, listDocuments } from "@/app/lib/api";
-import { formatTimestamp, getExcerpt, readStoredRole, writeStoredRole } from "@/app/lib/ui";
+import { ApiError, createDocument, deleteDocument, getHealth, listDocuments } from "@/app/lib/api";
+import { formatTimestamp, getExcerpt } from "@/app/lib/ui";
 import {
-  canUseAi,
   type DocumentRecord,
   type HealthResponse,
-  type UserRole,
 } from "@/app/lib/types";
-import RolePicker from "./role-picker";
+import { useAuth } from "./auth-provider";
 
 function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -65,6 +63,20 @@ function GridIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
+      <path
+        d="M9 4.5h6m-8 3h10m-8.8 0 .55 9.1a1 1 0 0 0 1 .94h4.5a1 1 0 0 0 1-.94l.55-9.1M10 10.5v4.5m4-4.5v4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
 function previewLines(content: string) {
   return getExcerpt(content, 135)
     .split(" ")
@@ -88,7 +100,7 @@ function previewLines(content: string) {
 
 export default function DocumentDashboard() {
   const router = useRouter();
-  const [role, setRole] = useState<UserRole>("owner");
+  const { logout, session } = useAuth();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,17 +110,7 @@ export default function DocumentDashboard() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const savedRole = readStoredRole();
-    if (savedRole) {
-      setRole(savedRole);
-    }
-  }, []);
-
-  useEffect(() => {
-    writeStoredRole(role);
-  }, [role]);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function loadDashboard() {
     setLoading(true);
@@ -188,6 +190,27 @@ export default function DocumentDashboard() {
     }
   }
 
+  async function handleDeleteDocument(document: DocumentRecord) {
+    const confirmed = window.confirm(`Delete "${document.title}"? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(document.id);
+    setError(null);
+
+    try {
+      await deleteDocument(document.id);
+      setDocuments((current) => current.filter((item) => item.id !== document.id));
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to delete the document.";
+      setError(message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <main className="app-shell min-h-screen flex-1">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8">
@@ -200,14 +223,12 @@ export default function DocumentDashboard() {
                   <div className="text-[2rem] font-semibold tracking-tight text-slate-900">
                     Document workspace
                   </div>
-                  <div className="text-sm text-slate-500">
-                    Create, find, and open shared drafts for the Assignment 1 proof of concept.
-                  </div>
+                  <div className="text-sm text-slate-500">Create a document, open it, and continue in the editor.</div>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 lg:min-w-[42rem] lg:flex-row lg:items-center lg:justify-end">
+            <div className="flex flex-col gap-3 lg:min-w-[48rem] lg:flex-row lg:items-center lg:justify-end">
               <label className="field flex h-14 flex-1 items-center rounded-full border-0 bg-[#f2efe8] px-5 shadow-none focus-within:bg-white">
                 <span className="pointer-events-none shrink-0 text-slate-500">
                   <SearchIcon />
@@ -219,9 +240,16 @@ export default function DocumentDashboard() {
                   className="h-full flex-1 bg-transparent pl-4 pr-1 text-base text-slate-700 outline-none placeholder:text-slate-400"
                 />
               </label>
-              <span className="pill border-0 bg-[rgba(49,94,138,0.08)] px-4 text-[#315e8a]">
-                {health ? "Backend live" : "Connecting"}
+              <span className="pill border-0 bg-[rgba(27,36,48,0.06)] px-4 text-slate-700">
+                {session?.user.email}
               </span>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="button-secondary h-11 rounded-full px-5"
+              >
+                Log out
+              </button>
             </div>
           </div>
         </header>
@@ -234,7 +262,7 @@ export default function DocumentDashboard() {
                 Start a new draft
               </h1>
               <p className="text-sm leading-7 text-slate-600">
-                Create a blank document or paste a brief before opening the editor.
+                Create a blank document or paste a brief before opening it in the editor.
               </p>
             </div>
 
@@ -264,44 +292,19 @@ export default function DocumentDashboard() {
             </form>
 
             {error ? <div className="notice notice-error mt-5">{error}</div> : null}
-
-            <div className="mt-5 rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(244,241,234,0.72)] p-4">
-              <RolePicker value={role} onChange={setRole} label="Current role" />
-            </div>
           </section>
 
           <section className="soft-panel rounded-[2rem] p-6">
-            <div className="flex flex-col gap-5 border-b border-[rgba(27,36,48,0.08)] pb-6 md:flex-row md:items-start md:justify-between">
-              <div>
-                <p className="section-label">Overview</p>
-                <h2 className="mt-2 max-w-2xl text-[2.1rem] font-semibold tracking-tight text-slate-900">
-                  Focused on the core document flow.
-                </h2>
-                <p className="mt-3 max-w-2xl text-[0.98rem] leading-8 text-slate-600">
-                  Create a document here, open it, then continue editing with role-aware controls,
-                  AI suggestions, and live connection state inside the editor.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
                 <div className="section-label">Documents</div>
                 <div className="mt-3 text-3xl font-semibold text-slate-900">{documents.length}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Existing drafts available from the local backend.
-                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Available drafts in the current workspace.</p>
               </div>
               <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
-                <div className="section-label">Status</div>
-                <div className="mt-3 text-3xl font-semibold capitalize text-slate-900">
-                  {health?.status ?? "checking"}
-                </div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {canUseAi(role)
-                    ? "The current role can edit the document and run AI suggestions."
-                    : "The current role is read-only in the editor preview."}
-                </p>
+                <div className="section-label">Account</div>
+                <div className="mt-3 text-2xl font-semibold text-slate-900">{session?.user.name}</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{health ? "Document service available." : "Trying to reach the document service."}</p>
               </div>
             </div>
           </section>
@@ -349,43 +352,57 @@ export default function DocumentDashboard() {
               const lines = previewLines(document.content);
 
               return (
-                <Link
+                <article
                   key={document.id}
-                  href={`/documents/${document.id}`}
                   className="group overflow-hidden rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.92)] transition hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
                 >
-                  <div className="bg-[rgba(244,241,234,0.72)] px-5 py-5">
-                    <div className="mx-auto flex h-[18.4rem] w-full max-w-[14rem] flex-col rounded-lg border border-[rgba(27,36,48,0.08)] bg-white px-4 py-4 shadow-[0_12px_22px_rgba(15,23,42,0.05)]">
-                      <div className="h-2.5 w-3/4 rounded-full bg-[#22384d]" />
-                      <div className="mt-4 space-y-2">
-                        {(lines.length === 0 ? ["No content yet."] : lines).map((line, index) => (
-                          <div
-                            key={`${document.id}-${index}`}
-                            className="h-1.5 rounded-full bg-slate-200"
-                            style={{ width: `${Math.min(94, Math.max(32, line.length * 2.4))}%` }}
-                          />
-                        ))}
-                        <div className="h-1.5 w-4/6 rounded-full bg-slate-200" />
+                  <Link href={`/documents/${document.id}`} className="block">
+                    <div className="bg-[rgba(244,241,234,0.72)] px-5 py-5">
+                      <div className="mx-auto flex h-[18.4rem] w-full max-w-[14rem] flex-col rounded-lg border border-[rgba(27,36,48,0.08)] bg-white px-4 py-4 shadow-[0_12px_22px_rgba(15,23,42,0.05)]">
+                        <div className="h-2.5 w-3/4 rounded-full bg-[#22384d]" />
+                        <div className="mt-4 space-y-2">
+                          {(lines.length === 0 ? ["No content yet."] : lines).map((line, index) => (
+                            <div
+                              key={`${document.id}-${index}`}
+                              className="h-1.5 rounded-full bg-slate-200"
+                              style={{ width: `${Math.min(94, Math.max(32, line.length * 2.4))}%` }}
+                            />
+                          ))}
+                          <div className="h-1.5 w-4/6 rounded-full bg-slate-200" />
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
                   <div className="px-5 py-4">
-                    <div className="line-clamp-1 text-[1.3rem] font-semibold tracking-tight text-slate-900">
-                      {document.title}
-                    </div>
-                    <p className="mt-2 line-clamp-2 text-[0.94rem] leading-6 text-slate-600">
-                      {getExcerpt(document.content, 100)}
-                    </p>
-                    <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
+                    <Link href={`/documents/${document.id}`} className="block">
+                      <div className="line-clamp-1 text-[1.3rem] font-semibold tracking-tight text-slate-900">
+                        {document.title}
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-[0.94rem] leading-6 text-slate-600">
+                        {getExcerpt(document.content, 100)}
+                      </p>
+                    </Link>
+                    <div className="mt-4 flex items-center justify-between gap-3 text-sm text-slate-500">
                       <div className="flex items-center gap-2">
                         <AppLogo compact />
                         <span>#{document.id}</span>
                       </div>
-                      <span>{formatTimestamp(document.updated_at)}</span>
+                      <div className="flex items-center gap-3">
+                        <span>{formatTimestamp(document.updated_at)}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteDocument(document)}
+                          disabled={deletingId === document.id}
+                          className="button-secondary h-9 rounded-full px-3 text-[#9f3d2b] hover:bg-[rgba(159,61,43,0.06)]"
+                        >
+                          <TrashIcon />
+                          <span className="ml-1">{deletingId === document.id ? "Deleting..." : "Delete"}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </Link>
+                </article>
               );
             })}
           </div>

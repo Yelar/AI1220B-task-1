@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "./config";
+import { getStoredAccessToken, refreshStoredSession } from "./auth";
 import type {
   AIInteraction,
   AIInvokeResponse,
@@ -26,15 +27,29 @@ export class ApiError extends Error {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    cache: "no-store",
-  });
+  async function runRequest() {
+    const accessToken = getStoredAccessToken();
+
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+    });
+  }
+
+  let response = await runRequest();
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshStoredSession().catch(() => null);
+    if (refreshedSession) {
+      response = await runRequest();
+    }
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -94,6 +109,12 @@ export function updateDocument(
 
 export function listVersions(documentId: number) {
   return apiRequest<DocumentVersion[]>(`/documents/${documentId}/versions`);
+}
+
+export function deleteDocument(documentId: number) {
+  return apiRequest<void>(`/documents/${documentId}`, {
+    method: "DELETE",
+  });
 }
 
 export function listAiHistory() {

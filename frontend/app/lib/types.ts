@@ -1,6 +1,34 @@
-export type UserRole = "owner" | "editor" | "commenter" | "viewer";
+export type UserRole = "owner" | "editor" | "viewer";
 
 export type AIFeature = "rewrite" | "summarize" | "translate" | "restructure";
+
+export type AuthStatus = "loading" | "authenticated" | "guest";
+
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+};
+
+export type AuthTokens = {
+  accessToken: string;
+  refreshToken: string;
+  accessExpiresAt: number;
+  refreshExpiresAt: number;
+};
+
+export type AuthSession = {
+  user: AuthUser;
+  tokens: AuthTokens;
+  source: "local" | "backend";
+};
+
+export type AuthFormPayload = {
+  name?: string;
+  email: string;
+  password: string;
+};
 
 export type DocumentRecord = {
   id: number;
@@ -56,11 +84,6 @@ export const roleOptions: Array<{
     value: "editor",
     label: "Editor",
     description: "Can update document text and invoke AI suggestions.",
-  },
-  {
-    value: "commenter",
-    label: "Commenter",
-    description: "Read-only in this proof of concept, with visibility into connection status and AI output.",
   },
   {
     value: "viewer",
