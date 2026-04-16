@@ -58,39 +58,23 @@ export default function AuthScreen({ mode }: { mode: "login" | "register" }) {
 
   return (
     <main className="app-shell min-h-screen flex-1 px-4 py-10 sm:px-6">
-      <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-[minmax(0,0.78fr),minmax(0,1fr)]">
-        <section className="soft-panel rounded-[2rem] p-8">
-          <div className="max-w-md space-y-5">
-            <div className="flex items-center gap-4">
+      <div className="mx-auto w-full max-w-2xl">
+        <section className="surface-card rounded-[2rem] p-8 sm:p-10">
+          <div className="mx-auto max-w-md">
+            <div className="mb-8 flex items-center gap-4">
               <AppLogo />
               <div>
                 <p className="section-label">Document workspace</p>
-                <h1 className="text-[2rem] font-semibold tracking-tight text-slate-900">Sign in</h1>
+                <h1 className="text-[2rem] font-semibold tracking-tight text-slate-900">
+                  {mode === "login" ? "Sign in" : "Create account"}
+                </h1>
               </div>
             </div>
 
-            <p className="text-[1.02rem] leading-8 text-slate-600">
-              Access the dashboard, create documents, and open the protected editor from one account.
-            </p>
-
-            <div className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-white/80 p-4">
-              <div className="section-label">Ready to use</div>
-              <p className="mt-2 text-sm leading-7 text-slate-600">
-                The seeded test account is already filled into the login form so you can review the flow directly.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="surface-card rounded-[2rem] p-8">
-          <div className="max-w-md">
             <p className="section-label">{mode === "login" ? "Login" : "Register"}</p>
             <h2 className="mt-2 text-[2rem] font-semibold tracking-tight text-slate-900">
               {mode === "login" ? "Sign in to continue" : "Create your account"}
             </h2>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
-              {mode === "login" ? "Use your account to open the protected workspace." : "Create a new account to enter the workspace."}
-            </p>
 
             <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
               {mode === "register" ? (

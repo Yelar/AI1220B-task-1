@@ -38,6 +38,16 @@ export type DocumentRecord = {
   updated_at: string;
 };
 
+export type DocumentShare = {
+  email: string;
+  role: Exclude<UserRole, "owner">;
+};
+
+export type AccessibleDocument = {
+  document: DocumentRecord;
+  role: UserRole;
+};
+
 export type DocumentVersion = {
   id: number;
   document_id: number;
@@ -101,5 +111,17 @@ export function canUseAi(role: UserRole) {
 }
 
 export function canCreateVersions(role: UserRole) {
+  return role === "owner";
+}
+
+export function canManageSharing(role: UserRole) {
+  return role === "owner";
+}
+
+export function canRestoreVersions(role: UserRole) {
+  return role === "owner";
+}
+
+export function canDeleteDocument(role: UserRole) {
   return role === "owner";
 }

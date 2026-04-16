@@ -17,21 +17,23 @@ export type RichTextEditorHandle = {
   focus: () => void;
   replaceSelection: (text: string) => void;
   getPlainText: () => string;
+  runCommand: (command: ToolbarCommand) => void;
 };
 
 type RichTextEditorProps = {
   value: string;
   disabled?: boolean;
   placeholder?: string;
+  showToolbar?: boolean;
   onChange: (value: string) => void;
   onSelectionChange?: (payload: SelectionPayload) => void;
 };
 
-type Command =
+export type ToolbarCommand =
   | { type: "format"; command: string; value?: string }
   | { type: "insert"; command: string };
 
-const toolbarCommands: Array<{ label: string; action: Command }> = [
+export const toolbarCommands: Array<{ label: string; action: ToolbarCommand }> = [
   { label: "P", action: { type: "format", command: "formatBlock", value: "p" } },
   { label: "H1", action: { type: "format", command: "formatBlock", value: "h1" } },
   { label: "H2", action: { type: "format", command: "formatBlock", value: "h2" } },
@@ -56,7 +58,7 @@ function normalizeHtml(value: string) {
 }
 
 const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
-  { value, disabled = false, placeholder, onChange, onSelectionChange },
+  { value, disabled = false, placeholder, showToolbar = true, onChange, onSelectionChange },
   ref,
 ) {
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +109,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
     editorRef.current?.focus();
   }
 
-  function runCommand(action: Command) {
+  function runCommand(action: ToolbarCommand) {
     if (disabled) {
       return;
     }
@@ -158,6 +160,9 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       getPlainText() {
         return htmlToPlainText(editorRef.current?.innerHTML ?? "");
       },
+      runCommand(action: ToolbarCommand) {
+        runCommand(action);
+      },
     }),
   );
 
@@ -179,20 +184,22 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
 
   return (
     <div className="space-y-4">
-      <div className="editor-toolbar">
-        {toolbarCommands.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            disabled={disabled}
-            className="editor-tool"
-            onMouseDown={handleToolbarMouseDown}
-            onClick={() => runCommand(item.action)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {showToolbar ? (
+        <div className="editor-toolbar">
+          {toolbarCommands.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={disabled}
+              className="editor-tool"
+              onMouseDown={handleToolbarMouseDown}
+              onClick={() => runCommand(item.action)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div
         ref={editorRef}

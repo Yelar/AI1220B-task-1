@@ -121,15 +121,20 @@ export function listAiHistory() {
   return apiRequest<AIInteraction[]>("/ai/history");
 }
 
+type InvokeAiOptions = {
+  signal?: AbortSignal;
+};
+
 export function invokeAi(payload: {
   feature: "rewrite" | "summarize" | "translate" | "restructure";
   selected_text: string;
   surrounding_context: string;
   target_language?: string;
   document_id?: number;
-}) {
+}, options: InvokeAiOptions = {}) {
   return apiRequest<AIInvokeResponse>("/ai/invoke", {
     method: "POST",
     body: payload,
+    signal: options.signal,
   });
 }

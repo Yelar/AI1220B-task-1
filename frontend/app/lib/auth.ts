@@ -77,6 +77,15 @@ function readUsersFromStorage() {
   }
 }
 
+export function listKnownAuthUsers() {
+  return readUsersFromStorage().map<AuthUser>((user) => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  }));
+}
+
 function writeUsersToStorage(users: StoredUserRecord[]) {
   if (!isBrowser()) {
     return;

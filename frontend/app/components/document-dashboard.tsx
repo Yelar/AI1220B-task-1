@@ -10,13 +10,12 @@ import {
   type FormEvent,
 } from "react";
 
-import { ApiError, createDocument, deleteDocument, getHealth, listDocuments } from "@/app/lib/api";
+import { ApiError, createDocument, deleteDocument, listDocuments } from "@/app/lib/api";
+import { canDeleteDocument, type AccessibleDocument, type DocumentRecord } from "@/app/lib/types";
+import { getAccessibleDocuments } from "@/app/lib/document-access";
 import { formatTimestamp, getExcerpt } from "@/app/lib/ui";
-import {
-  type DocumentRecord,
-  type HealthResponse,
-} from "@/app/lib/types";
 import { useAuth } from "./auth-provider";
+import AccountMenu from "./account-menu";
 
 function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -102,7 +101,6 @@ export default function DocumentDashboard() {
   const router = useRouter();
   const { logout, session } = useAuth();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -116,35 +114,25 @@ export default function DocumentDashboard() {
     setLoading(true);
     setError(null);
 
-    const [documentsResult, healthResult] = await Promise.allSettled([
-      listDocuments(),
-      getHealth(),
-    ]);
-
-    if (documentsResult.status === "fulfilled") {
-      setDocuments(documentsResult.value);
-    } else {
+    try {
+      setDocuments(await listDocuments());
+    } catch (requestError) {
       const message =
-        documentsResult.reason instanceof Error
-          ? documentsResult.reason.message
-          : "Failed to load documents.";
+        requestError instanceof Error ? requestError.message : "Failed to load documents.";
       setError(message);
+      setDocuments([]);
+    } finally {
+      setLoading(false);
     }
-
-    if (healthResult.status === "fulfilled") {
-      setHealth(healthResult.value);
-    } else if (documentsResult.status !== "rejected") {
-      setError("Backend health check failed. Confirm the FastAPI server is running.");
-    }
-
-    setLoading(false);
   }
 
   useEffect(() => {
     void loadDashboard();
   }, []);
 
-  const filteredDocuments = documents.filter((document) => {
+  const accessibleDocuments = getAccessibleDocuments(documents, session?.user.email ?? "");
+
+  const filteredDocuments = accessibleDocuments.filter(({ document }) => {
     const query = deferredSearch.trim().toLowerCase();
     if (!query) {
       return true;
@@ -223,7 +211,7 @@ export default function DocumentDashboard() {
                   <div className="text-[2rem] font-semibold tracking-tight text-slate-900">
                     Document workspace
                   </div>
-                  <div className="text-sm text-slate-500">Create a document, open it, and continue in the editor.</div>
+                  <div className="text-sm text-slate-500">Create, open, and manage your documents.</div>
                 </div>
               </div>
             </div>
@@ -240,74 +228,45 @@ export default function DocumentDashboard() {
                   className="h-full flex-1 bg-transparent pl-4 pr-1 text-base text-slate-700 outline-none placeholder:text-slate-400"
                 />
               </label>
-              <span className="pill border-0 bg-[rgba(27,36,48,0.06)] px-4 text-slate-700">
-                {session?.user.email}
-              </span>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="button-secondary h-11 rounded-full px-5"
-              >
-                Log out
-              </button>
+              {session?.user ? <AccountMenu user={session.user} onLogout={() => logout()} /> : null}
             </div>
           </div>
         </header>
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,420px),1fr]">
-          <section className="surface-card rounded-[2rem] p-6">
-            <div className="space-y-2">
-              <p className="section-label">Create document</p>
-              <h1 className="text-[2rem] font-semibold tracking-tight text-slate-900">
-                Start a new draft
-              </h1>
-              <p className="text-sm leading-7 text-slate-600">
-                Create a blank document or paste a brief before opening it in the editor.
-              </p>
-            </div>
+        <section className="surface-card rounded-[2rem] p-6">
+          <div className="space-y-2">
+            <p className="section-label">Create document</p>
+            <h1 className="text-[2rem] font-semibold tracking-tight text-slate-900">
+              Start a new draft
+            </h1>
+          </div>
 
-            <form className="mt-6 space-y-4" onSubmit={handleCreateDocument}>
-              <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Untitled document"
-                className="field"
-              />
+          <form className="mt-6 space-y-4" onSubmit={handleCreateDocument}>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Untitled document"
+              className="field"
+            />
 
-              <textarea
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                placeholder="Paste assignment notes, project context, or a starting paragraph."
-                rows={10}
-                className="field-area min-h-[16rem]"
-              />
+            <textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="Start with a note, paragraph, or meeting summary."
+              rows={10}
+              className="field-area min-h-[16rem]"
+            />
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="button-primary h-12 w-full rounded-full"
-              >
-                {submitting ? "Creating..." : "Create and open"}
-              </button>
-            </form>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="button-primary h-12 w-full rounded-full"
+            >
+              {submitting ? "Creating..." : "Create and open"}
+            </button>
+          </form>
 
-            {error ? <div className="notice notice-error mt-5">{error}</div> : null}
-          </section>
-
-          <section className="soft-panel rounded-[2rem] p-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
-                <div className="section-label">Documents</div>
-                <div className="mt-3 text-3xl font-semibold text-slate-900">{documents.length}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">Available drafts in the current workspace.</p>
-              </div>
-              <div className="rounded-[1.5rem] border border-[rgba(27,36,48,0.08)] bg-white/86 p-5">
-                <div className="section-label">Account</div>
-                <div className="mt-3 text-2xl font-semibold text-slate-900">{session?.user.name}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{health ? "Document service available." : "Trying to reach the document service."}</p>
-              </div>
-            </div>
-          </section>
+          {error ? <div className="notice notice-error mt-5">{error}</div> : null}
         </section>
 
         <section className="surface-card rounded-[2rem] px-5 py-6 sm:px-7">
@@ -318,7 +277,7 @@ export default function DocumentDashboard() {
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 {loading
-                  ? "Loading the local document library."
+                  ? "Loading documents."
                   : `${filteredDocuments.length} document${filteredDocuments.length === 1 ? "" : "s"} visible`}
               </p>
             </div>
@@ -326,7 +285,7 @@ export default function DocumentDashboard() {
             <button
               type="button"
               onClick={() => void loadDashboard()}
-              className="inline-flex h-11 items-center gap-2 rounded-full border border-slate-200 px-4 text-slate-700 hover:bg-slate-50"
+              className="button-secondary inline-flex h-11 items-center gap-2 rounded-full px-4 text-slate-700"
             >
               <GridIcon />
               Refresh
@@ -336,7 +295,7 @@ export default function DocumentDashboard() {
           <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
             {loading ? (
               <div className="notice notice-info col-span-full">
-                Loading documents from the local backend...
+                Loading documents...
               </div>
             ) : null}
 
@@ -344,11 +303,13 @@ export default function DocumentDashboard() {
               <div className="notice notice-info col-span-full">
                 {documents.length === 0
                   ? "No documents exist yet. Create the first one from the draft panel."
-                  : "No documents match the current search."}
+                  : accessibleDocuments.length === 0
+                    ? "No shared or owned documents are available for this account yet."
+                    : "No documents match the current search."}
               </div>
             ) : null}
 
-            {filteredDocuments.map((document) => {
+            {filteredDocuments.map(({ document, role }: AccessibleDocument) => {
               const lines = previewLines(document.content);
 
               return (
@@ -376,8 +337,13 @@ export default function DocumentDashboard() {
 
                   <div className="px-5 py-4">
                     <Link href={`/documents/${document.id}`} className="block">
-                      <div className="line-clamp-1 text-[1.3rem] font-semibold tracking-tight text-slate-900">
-                        {document.title}
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="line-clamp-1 text-[1.3rem] font-semibold tracking-tight text-slate-900">
+                          {document.title}
+                        </div>
+                        <span className="shrink-0 pt-1 text-[0.76rem] font-medium text-slate-400">
+                          {formatTimestamp(document.updated_at)}
+                        </span>
                       </div>
                       <p className="mt-2 line-clamp-2 text-[0.94rem] leading-6 text-slate-600">
                         {getExcerpt(document.content, 100)}
@@ -387,18 +353,22 @@ export default function DocumentDashboard() {
                       <div className="flex items-center gap-2">
                         <AppLogo compact />
                         <span>#{document.id}</span>
+                        <span className="pill border-0 bg-[rgba(49,94,138,0.08)] px-3 text-[0.72rem] text-[#315e8a]">
+                          {role}
+                        </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span>{formatTimestamp(document.updated_at)}</span>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteDocument(document)}
-                          disabled={deletingId === document.id}
-                          className="button-secondary h-9 rounded-full px-3 text-[#9f3d2b] hover:bg-[rgba(159,61,43,0.06)]"
-                        >
-                          <TrashIcon />
-                          <span className="ml-1">{deletingId === document.id ? "Deleting..." : "Delete"}</span>
-                        </button>
+                        {canDeleteDocument(role) ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteDocument(document)}
+                            disabled={deletingId === document.id}
+                            className="button-secondary h-9 rounded-full px-3 text-[#9f3d2b] hover:bg-[rgba(159,61,43,0.06)]"
+                          >
+                            <TrashIcon />
+                            <span className="ml-1">{deletingId === document.id ? "Deleting..." : "Delete"}</span>
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
