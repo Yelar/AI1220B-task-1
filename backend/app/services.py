@@ -62,8 +62,6 @@ def sanitize_model_output(content: str) -> str:
         if len(lines) >= 3:
             cleaned = "\n".join(lines[1:-1]).strip()
 
-    cleaned = cleaned.strip().strip('"').strip("'").strip()
-
     changed = True
     while changed:
         changed = False
@@ -87,7 +85,8 @@ def sanitize_model_output(content: str) -> str:
         ):
             cleaned = remainder.strip()
 
-    return cleaned.strip()
+    cleaned = cleaned.strip().strip('"').strip("'").strip()
+    return cleaned
 
 
 async def generate_ai_suggestion(payload: AIInvokeRequest) -> AIResult:
