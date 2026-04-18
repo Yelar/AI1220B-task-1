@@ -82,6 +82,23 @@ Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000
 - `GET /api/users/me`
 - `WS /ws/documents/{document_id}`
 
+
+## Backend Setup
+
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+API docs available at:
+http://127.0.0.1:8000/docs
+
+Authentication:
+- Register → Login → Authorize using Bearer token
+
+
+
 ## Troubleshooting
 
 - If AI responses do not work, verify LM Studio is running and the model name in `backend/.env` matches the loaded model.

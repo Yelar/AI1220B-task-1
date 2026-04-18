@@ -1,0 +1,4 @@
+- Replaced demo X-User-Id authentication with JWT-based authentication
+- Maintained SQLite for local-first setup
+- AI runs locally using LM Studio
+- Used last-write-wins instead of CRDT for collaboration
