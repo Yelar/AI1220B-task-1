@@ -9,9 +9,10 @@ type DocumentPageProps = {
 
 export default async function DocumentPage({ params }: DocumentPageProps) {
   const { id } = await params;
+  const normalizedId = Number.parseInt(String(id).trim(), 10);
   return (
     <AuthGate>
-      <DocumentEditor documentId={Number(id)} />
+      <DocumentEditor documentId={normalizedId} />
     </AuthGate>
   );
 }

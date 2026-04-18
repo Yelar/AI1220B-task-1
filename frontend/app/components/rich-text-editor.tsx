@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -17,6 +18,7 @@ export type RichTextEditorHandle = {
   focus: () => void;
   replaceSelection: (text: string) => void;
   getPlainText: () => string;
+  getSelectedText: () => string;
   runCommand: (command: ToolbarCommand) => void;
 };
 
@@ -64,7 +66,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
   const editorRef = useRef<HTMLDivElement | null>(null);
   const rangeRef = useRef<Range | null>(null);
 
-  function syncSelection() {
+  const syncSelection = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) {
       return;
@@ -93,7 +95,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       selectedText: "",
       plainText: htmlToPlainText(editor.innerHTML),
     });
-  }
+  }, [onSelectionChange]);
 
   function emitChange() {
     const editor = editorRef.current;
@@ -160,6 +162,9 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       getPlainText() {
         return htmlToPlainText(editorRef.current?.innerHTML ?? "");
       },
+      getSelectedText() {
+        return window.getSelection?.()?.toString() ?? "";
+      },
       runCommand(action: ToolbarCommand) {
         runCommand(action);
       },
@@ -177,6 +182,22 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       editor.innerHTML = normalized || "";
     }
   }, [value]);
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      const editor = editorRef.current;
+      if (!editor || !editor.contains(document.activeElement)) {
+        return;
+      }
+
+      syncSelection();
+    }
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [syncSelection]);
 
   function handleToolbarMouseDown(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();

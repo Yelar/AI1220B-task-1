@@ -41,6 +41,49 @@ function buildTokens(data: TokenResponse): AuthTokens {
   };
 }
 
+function isValidTokens(value: unknown): value is AuthTokens {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<AuthTokens>;
+  return (
+    typeof candidate.accessToken === "string" &&
+    typeof candidate.refreshToken === "string" &&
+    typeof candidate.accessExpiresAt === "number" &&
+    Number.isFinite(candidate.accessExpiresAt) &&
+    typeof candidate.refreshExpiresAt === "number" &&
+    Number.isFinite(candidate.refreshExpiresAt)
+  );
+}
+
+function isValidUser(value: unknown): value is AuthUser {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<AuthUser>;
+  return (
+    typeof candidate.id === "number" &&
+    Number.isFinite(candidate.id) &&
+    typeof candidate.name === "string" &&
+    typeof candidate.email === "string"
+  );
+}
+
+function isValidSession(value: unknown): value is AuthSession {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<AuthSession>;
+  return (
+    isValidUser(candidate.user) &&
+    isValidTokens(candidate.tokens) &&
+    candidate.source === "backend"
+  );
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   const raw = await response.text();
   return raw ? (JSON.parse(raw) as T) : ({} as T);
@@ -105,7 +148,13 @@ export function readStoredSession() {
   }
 
   try {
-    return JSON.parse(raw) as AuthSession;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isValidSession(parsed)) {
+      window.localStorage.removeItem(authSessionStorageKey);
+      return null;
+    }
+
+    return parsed;
   } catch {
     window.localStorage.removeItem(authSessionStorageKey);
     return null;

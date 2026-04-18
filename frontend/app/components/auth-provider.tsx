@@ -19,6 +19,17 @@ import {
 } from "@/app/lib/auth";
 import type { AuthFormPayload, AuthSession, AuthStatus } from "@/app/lib/types";
 
+const authBootstrapTimeoutMs = 2500;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  return await Promise.race<T>([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error("Authentication timed out.")), timeoutMs);
+    }),
+  ]);
+}
+
 type AuthContextValue = {
   status: AuthStatus;
   session: AuthSession | null;
@@ -38,37 +49,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     async function bootstrap() {
-      const stored = readStoredSession();
-
-      if (!stored) {
-        if (active) {
-          setStatus("guest");
-        }
-        return;
-      }
-
-      if (stored.tokens.accessExpiresAt > Date.now()) {
-        if (active) {
-          setSession(stored);
-          setStatus("authenticated");
-        }
-        return;
-      }
+      let resolvedSession: AuthSession | null = null;
 
       try {
-        const refreshed = await refreshStoredSession();
+        const stored = readStoredSession();
+
+        if (!stored) {
+          if (active) {
+            setStatus("guest");
+          }
+          return;
+        }
+
+        if (stored.tokens.accessExpiresAt > Date.now()) {
+          if (active) {
+            resolvedSession = stored;
+            setSession(stored);
+            setStatus("authenticated");
+          }
+          return;
+        }
+
+        const refreshed = await withTimeout(refreshStoredSession(), authBootstrapTimeoutMs);
         if (active && refreshed) {
+          resolvedSession = refreshed;
           setSession(refreshed);
           setStatus("authenticated");
           return;
         }
       } catch {
         clearStoredSession();
-      }
-
-      if (active) {
-        setSession(null);
-        setStatus("guest");
+      } finally {
+        if (active) {
+          if (resolvedSession) {
+            setSession(resolvedSession);
+            setStatus("authenticated");
+          } else {
+            setSession(null);
+            setStatus("guest");
+          }
+        }
       }
     }
 

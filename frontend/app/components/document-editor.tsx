@@ -173,7 +173,7 @@ function createVersionLabel() {
 }
 
 export default function DocumentEditor({ documentId }: { documentId: number }) {
-  const { session, logout } = useAuth();
+  const { session, logout, status } = useAuth();
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -342,9 +342,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   }, []);
 
   useEffect(() => {
-    if (!Number.isFinite(documentId) || documentId <= 0 || !currentUserEmail) {
+    if (!Number.isFinite(documentId) || documentId <= 0) {
       setError("Invalid document id.");
       setLoading(false);
+      return;
+    }
+
+    if (status !== "authenticated" || !currentUserEmail) {
+      setLoading(true);
+      setError(null);
       return;
     }
 
@@ -401,7 +407,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         window.clearTimeout(typingTimerRef.current);
       }
     };
-  }, [currentUserEmail, detectDocumentRole, documentId, loadAiHistoryForDocument, loadUsersAndShares, loadVersionsForDocument]);
+  }, [currentUserEmail, detectDocumentRole, documentId, loadAiHistoryForDocument, loadUsersAndShares, loadVersionsForDocument, status]);
 
   useEffect(() => {
     setPlainTextSnapshot(stripHtml(content));
@@ -836,6 +842,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     editorRef.current?.runCommand(action);
   }
 
+  function handleOpenAiPanel() {
+    const liveSelection = editorRef.current?.getSelectedText().trim() ?? "";
+    if (liveSelection) {
+      setSelectedText(liveSelection);
+    }
+    setShowAiPanel((current) => !current);
+  }
+
   const wordCount = plainTextSnapshot.trim() ? plainTextSnapshot.trim().split(/\s+/).length : 0;
   const lastUpdated = document ? formatTimestamp(document.updated_at) : "Unavailable";
   const saveStateLabel =
@@ -972,7 +986,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAiPanel((current) => !current)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={handleOpenAiPanel}
                   aria-label="Open AI assistant"
                   className={`ai-trigger ${showAiPanel ? "is-open" : ""}`}
                 >
