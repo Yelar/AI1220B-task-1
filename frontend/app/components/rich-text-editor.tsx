@@ -1,0 +1,239 @@
+"use client";
+
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type MouseEvent,
+} from "react";
+
+type SelectionPayload = {
+  selectedText: string;
+  plainText: string;
+};
+
+export type RichTextEditorHandle = {
+  focus: () => void;
+  replaceSelection: (text: string) => void;
+  getPlainText: () => string;
+  getSelectedText: () => string;
+  runCommand: (command: ToolbarCommand) => void;
+};
+
+type RichTextEditorProps = {
+  value: string;
+  disabled?: boolean;
+  placeholder?: string;
+  showToolbar?: boolean;
+  onChange: (value: string) => void;
+  onSelectionChange?: (payload: SelectionPayload) => void;
+};
+
+export type ToolbarCommand =
+  | { type: "format"; command: string; value?: string }
+  | { type: "insert"; command: string };
+
+export const toolbarCommands: Array<{ label: string; action: ToolbarCommand }> = [
+  { label: "P", action: { type: "format", command: "formatBlock", value: "p" } },
+  { label: "H1", action: { type: "format", command: "formatBlock", value: "h1" } },
+  { label: "H2", action: { type: "format", command: "formatBlock", value: "h2" } },
+  { label: "B", action: { type: "format", command: "bold" } },
+  { label: "I", action: { type: "format", command: "italic" } },
+  { label: "UL", action: { type: "format", command: "insertUnorderedList" } },
+  { label: "OL", action: { type: "format", command: "insertOrderedList" } },
+  { label: "</>", action: { type: "format", command: "formatBlock", value: "pre" } },
+];
+
+function htmlToPlainText(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h1|h2|h3|li|pre)>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\u00a0/g, " ");
+}
+
+function normalizeHtml(value: string) {
+  const trimmed = value.trim();
+  return trimmed === "<br>" ? "" : trimmed;
+}
+
+const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
+  { value, disabled = false, placeholder, showToolbar = true, onChange, onSelectionChange },
+  ref,
+) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const rangeRef = useRef<Range | null>(null);
+
+  const syncSelection = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      onSelectionChange?.({
+        selectedText: "",
+        plainText: htmlToPlainText(editor.innerHTML),
+      });
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (range.commonAncestorContainer && editor.contains(range.commonAncestorContainer)) {
+      rangeRef.current = range.cloneRange();
+      onSelectionChange?.({
+        selectedText: selection.toString(),
+        plainText: htmlToPlainText(editor.innerHTML),
+      });
+      return;
+    }
+
+    onSelectionChange?.({
+      selectedText: "",
+      plainText: htmlToPlainText(editor.innerHTML),
+    });
+  }, [onSelectionChange]);
+
+  function emitChange() {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    onChange(normalizeHtml(editor.innerHTML));
+    syncSelection();
+  }
+
+  function focusEditor() {
+    editorRef.current?.focus();
+  }
+
+  function runCommand(action: ToolbarCommand) {
+    if (disabled) {
+      return;
+    }
+
+    focusEditor();
+
+    if (action.type === "format") {
+      document.execCommand(action.command, false, action.value);
+    }
+
+    if (action.type === "insert") {
+      document.execCommand(action.command, false);
+    }
+
+    emitChange();
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus() {
+        focusEditor();
+      },
+      replaceSelection(text: string) {
+        const editor = editorRef.current;
+        if (!editor) {
+          return;
+        }
+
+        focusEditor();
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          if (rangeRef.current) {
+            selection.addRange(rangeRef.current);
+          }
+        }
+
+        const escapedText = text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\n/g, "<br>");
+
+        document.execCommand("insertHTML", false, escapedText);
+        emitChange();
+      },
+      getPlainText() {
+        return htmlToPlainText(editorRef.current?.innerHTML ?? "");
+      },
+      getSelectedText() {
+        return window.getSelection?.()?.toString() ?? "";
+      },
+      runCommand(action: ToolbarCommand) {
+        runCommand(action);
+      },
+    }),
+  );
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    const normalized = normalizeHtml(value);
+    if (normalizeHtml(editor.innerHTML) !== normalized) {
+      editor.innerHTML = normalized || "";
+    }
+  }, [value]);
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      const editor = editorRef.current;
+      if (!editor || !editor.contains(document.activeElement)) {
+        return;
+      }
+
+      syncSelection();
+    }
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [syncSelection]);
+
+  function handleToolbarMouseDown(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+  }
+
+  return (
+    <div className="space-y-4">
+      {showToolbar ? (
+        <div className="editor-toolbar">
+          {toolbarCommands.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={disabled}
+              className="editor-tool"
+              onMouseDown={handleToolbarMouseDown}
+              onClick={() => runCommand(item.action)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div
+        ref={editorRef}
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        className={`rich-editor ${disabled ? "rich-editor-disabled" : ""}`}
+        data-placeholder={placeholder}
+        onInput={emitChange}
+        onKeyUp={syncSelection}
+        onMouseUp={syncSelection}
+      />
+    </div>
+  );
+});
+
+export default RichTextEditor;

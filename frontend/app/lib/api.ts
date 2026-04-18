@@ -1,14 +1,19 @@
 import { API_BASE_URL } from "./config";
+import { clearStoredSession, getStoredAccessToken, refreshStoredSession } from "./auth";
 import type {
+  AIInteractionStatus,
   AIInteraction,
+  AIStreamChunkEvent,
+  AIStreamDoneEvent,
+  AIStreamErrorEvent,
+  AIStreamStartEvent,
   AIInvokeResponse,
-  DemoUser,
+  AuthUser,
   DocumentPermission,
   DocumentRecord,
   DocumentVersion,
   HealthResponse,
 } from "./types";
-import { getDemoIdentityFromStoredRole } from "./ui";
 
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
@@ -16,6 +21,21 @@ type RequestOptions = Omit<RequestInit, "body"> & {
 
 type ErrorShape = {
   detail?: string;
+};
+
+type StreamAiRequest = {
+  feature: "rewrite" | "summarize" | "translate" | "restructure";
+  selected_text: string;
+  surrounding_context: string;
+  target_language?: string;
+  document_id?: number;
+};
+
+type StreamAiCallbacks = {
+  onStart?: (event: AIStreamStartEvent) => void;
+  onChunk?: (event: AIStreamChunkEvent) => void;
+  onDone?: (event: AIStreamDoneEvent) => void;
+  onError?: (event: AIStreamErrorEvent) => void;
 };
 
 export class ApiError extends Error {
@@ -28,18 +48,48 @@ export class ApiError extends Error {
   }
 }
 
+async function readResponseError(response: Response) {
+  const rawBody = await response.text();
+  if (!rawBody) {
+    return `Request failed with status ${response.status}.`;
+  }
+
+  try {
+    const parsed = JSON.parse(rawBody) as ErrorShape;
+    if (typeof parsed.detail === "string") {
+      return parsed.detail;
+    }
+  } catch {
+    // Fall back to the raw body when the payload is not JSON.
+  }
+
+  return rawBody;
+}
+
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const identity = getDemoIdentityFromStoredRole();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": String(identity.userId),
-      ...(options.headers ?? {}),
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    cache: "no-store",
-  });
+  async function runRequest() {
+    const accessToken = getStoredAccessToken();
+
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+    });
+  }
+
+  let response = await runRequest();
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshStoredSession().catch(() => null);
+    if (refreshedSession) {
+      response = await runRequest();
+    }
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -49,44 +99,19 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
   const data = rawBody ? (JSON.parse(rawBody) as ErrorShape | T) : null;
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredSession();
+    }
     const detail =
       typeof (data as ErrorShape | null)?.detail === "string"
         ? (data as ErrorShape).detail!
-        : `Request failed with status ${response.status}.`;
+        : response.status === 401
+          ? "Your session expired. Sign in again."
+          : `Request failed with status ${response.status}.`;
     throw new ApiError(detail, response.status);
   }
 
   return data as T;
-}
-
-async function downloadRequest(path: string): Promise<Blob> {
-  const identity = getDemoIdentityFromStoredRole();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "X-User-Id": String(identity.userId),
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const rawBody = await response.text();
-    let message = `Request failed with status ${response.status}.`;
-
-    if (rawBody) {
-      try {
-        const parsed = JSON.parse(rawBody) as ErrorShape;
-        if (typeof parsed.detail === "string") {
-          message = parsed.detail;
-        }
-      } catch {
-        message = rawBody;
-      }
-    }
-
-    throw new ApiError(message, response.status);
-  }
-
-  return response.blob();
 }
 
 export function getHealth() {
@@ -144,36 +169,31 @@ export function revertVersion(documentId: number, versionId: number) {
   });
 }
 
+export function deleteDocument(documentId: number) {
+  return apiRequest<void>(`/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listUsers() {
+  return apiRequest<AuthUser[]>("/users");
+}
+
 export function listPermissions(documentId: number) {
   return apiRequest<DocumentPermission[]>(`/documents/${documentId}/permissions`);
 }
 
-export function upsertPermission(
-  documentId: number,
-  payload: { user_id: number; role: "owner" | "editor" | "commenter" | "viewer" },
-) {
+export function upsertPermission(documentId: number, payload: { user_id: number; role: "owner" | "editor" | "viewer" }) {
   return apiRequest<DocumentPermission>(`/documents/${documentId}/permissions`, {
     method: "POST",
     body: payload,
   });
 }
 
-export function deletePermission(documentId: number, userId: number) {
+export function removePermission(documentId: number, userId: number) {
   return apiRequest<void>(`/documents/${documentId}/permissions/${userId}`, {
     method: "DELETE",
   });
-}
-
-export function exportDocument(documentId: number, format: "md" | "txt" | "json") {
-  return downloadRequest(`/documents/${documentId}/export?format=${format}`);
-}
-
-export function listUsers() {
-  return apiRequest<DemoUser[]>("/users");
-}
-
-export function getCurrentUser() {
-  return apiRequest<DemoUser>("/users/me");
 }
 
 export function listAiHistory(params?: {
@@ -192,8 +212,8 @@ export function listAiHistory(params?: {
     search.set("limit", String(params.limit));
   }
 
-  const suffix = search.size ? `?${search.toString()}` : "";
-  return apiRequest<AIInteraction[]>(`/ai/history${suffix}`);
+  const query = search.size ? `?${search.toString()}` : "";
+  return apiRequest<AIInteraction[]>(`/ai/history${query}`);
 }
 
 export function invokeAi(payload: {
@@ -202,9 +222,162 @@ export function invokeAi(payload: {
   surrounding_context: string;
   target_language?: string;
   document_id?: number;
-}) {
+}, options: { signal?: AbortSignal } = {}) {
   return apiRequest<AIInvokeResponse>("/ai/invoke", {
     method: "POST",
     body: payload,
+    signal: options.signal,
   });
+}
+
+export function updateAiHistoryStatus(
+  interactionId: number,
+  payload: { status: AIInteractionStatus },
+) {
+  return apiRequest<AIInteraction>(`/ai/history/${interactionId}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+function parseSseEventBlock(block: string) {
+  let eventName = "message";
+  const dataLines: string[] = [];
+
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (!dataLines.length) {
+    return null;
+  }
+
+  try {
+    return {
+      event: eventName,
+      data: JSON.parse(dataLines.join("\n")) as
+        | AIStreamStartEvent
+        | AIStreamChunkEvent
+        | AIStreamDoneEvent
+        | AIStreamErrorEvent,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function dispatchStreamEvent(
+  parsed: ReturnType<typeof parseSseEventBlock>,
+  callbacks: StreamAiCallbacks,
+) {
+  if (!parsed) {
+    return;
+  }
+
+  switch (parsed.event) {
+    case "start":
+      callbacks.onStart?.(parsed.data as AIStreamStartEvent);
+      break;
+    case "chunk":
+      callbacks.onChunk?.(parsed.data as AIStreamChunkEvent);
+      break;
+    case "done":
+      callbacks.onDone?.(parsed.data as AIStreamDoneEvent);
+      break;
+    case "error":
+      callbacks.onError?.(parsed.data as AIStreamErrorEvent);
+      break;
+    default:
+      break;
+  }
+}
+
+export async function streamAiSuggestion(
+  payload: StreamAiRequest,
+  callbacks: StreamAiCallbacks = {},
+  signal?: AbortSignal,
+) {
+  async function runRequest() {
+    const accessToken = getStoredAccessToken();
+    return fetch(`${API_BASE_URL}/ai/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal,
+      cache: "no-store",
+    });
+  }
+
+  let response = await runRequest();
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshStoredSession().catch(() => null);
+    if (refreshedSession) {
+      response = await runRequest();
+    }
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredSession();
+    }
+    throw new ApiError(await readResponseError(response), response.status);
+  }
+
+  if (!response.body) {
+    throw new ApiError("Streaming response body is unavailable.", response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex = buffer.indexOf("\n\n");
+
+      while (separatorIndex !== -1) {
+        const block = buffer.slice(0, separatorIndex).trim();
+        buffer = buffer.slice(separatorIndex + 2);
+
+        if (block) {
+          dispatchStreamEvent(parseSseEventBlock(block), callbacks);
+        }
+
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+    }
+
+    const trailingBlock = buffer.trim();
+    if (trailingBlock) {
+      dispatchStreamEvent(parseSseEventBlock(trailingBlock), callbacks);
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }

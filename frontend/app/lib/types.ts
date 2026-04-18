@@ -1,6 +1,43 @@
-export type UserRole = "owner" | "editor" | "commenter" | "viewer";
+export type UserRole = "owner" | "editor" | "viewer";
 
 export type AIFeature = "rewrite" | "summarize" | "translate" | "restructure";
+
+export type AIInteractionStatus =
+  | "streaming"
+  | "completed"
+  | "accepted"
+  | "rejected"
+  | "edited_applied"
+  | "partially_applied"
+  | "cancelled"
+  | "failed";
+
+export type AuthStatus = "loading" | "authenticated" | "guest";
+
+export type AuthUser = {
+  id: number;
+  name: string;
+  email: string;
+};
+
+export type AuthTokens = {
+  accessToken: string;
+  refreshToken: string;
+  accessExpiresAt: number;
+  refreshExpiresAt: number;
+};
+
+export type AuthSession = {
+  user: AuthUser;
+  tokens: AuthTokens;
+  source: "backend";
+};
+
+export type AuthFormPayload = {
+  name?: string;
+  email: string;
+  password: string;
+};
 
 export type DocumentRecord = {
   id: number;
@@ -8,6 +45,24 @@ export type DocumentRecord = {
   content: string;
   created_at: string;
   updated_at: string;
+};
+
+export type DocumentShare = {
+  user_id: number;
+  name: string;
+  email: string;
+  role: Exclude<UserRole, "owner">;
+};
+
+export type AccessibleDocument = {
+  document: DocumentRecord;
+};
+
+export type DocumentPermission = {
+  id: number;
+  document_id: number;
+  user_id: number;
+  role: UserRole;
 };
 
 export type DocumentVersion = {
@@ -18,28 +73,15 @@ export type DocumentVersion = {
   created_at: string;
 };
 
-export type DocumentPermission = {
-  id: number;
-  document_id: number;
-  user_id: number;
-  role: UserRole;
-};
-
-export type DemoUser = {
-  id: number;
-  email: string;
-  name: string;
-};
-
 export type AIInteraction = {
   id: number;
   document_id: number | null;
-  user_id: number | null;
+  user_id?: number | null;
   feature: AIFeature;
   prompt_excerpt: string;
   response_text: string;
   model_name: string;
-  status: string;
+  status: AIInteractionStatus;
   created_at: string;
 };
 
@@ -48,8 +90,35 @@ export type AIInvokeResponse = {
   output_text: string;
   model_name: string;
   provider: string;
-  status: string;
+  status: AIInteractionStatus;
   mocked?: boolean;
+  interaction_id?: number | null;
+};
+
+export type AIStreamStartEvent = {
+  interaction_id: number;
+  feature: AIFeature;
+  provider: string;
+  model_name: string;
+};
+
+export type AIStreamChunkEvent = {
+  interaction_id: number;
+  delta: string;
+  text: string;
+};
+
+export type AIStreamDoneEvent = {
+  interaction_id: number;
+  feature: AIFeature;
+  output_text: string;
+  provider: string;
+  model_name: string;
+};
+
+export type AIStreamErrorEvent = {
+  interaction_id: number;
+  message: string;
 };
 
 export type HealthResponse = {
@@ -73,11 +142,6 @@ export const roleOptions: Array<{
     description: "Can update document text and invoke AI suggestions.",
   },
   {
-    value: "commenter",
-    label: "Commenter",
-    description: "Read-only in this proof of concept, with visibility into connection status and AI output.",
-  },
-  {
     value: "viewer",
     label: "Viewer",
     description: "Read-only mode for walkthroughs and evaluation.",
@@ -93,13 +157,17 @@ export function canUseAi(role: UserRole) {
 }
 
 export function canCreateVersions(role: UserRole) {
-  return role === "owner" || role === "editor";
-}
-
-export function canRevertVersions(role: UserRole) {
   return role === "owner";
 }
 
-export function canManagePermissions(role: UserRole) {
+export function canManageSharing(role: UserRole) {
+  return role === "owner";
+}
+
+export function canRestoreVersions(role: UserRole) {
+  return role === "owner";
+}
+
+export function canDeleteDocument(role: UserRole) {
   return role === "owner";
 }

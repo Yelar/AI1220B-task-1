@@ -40,9 +40,24 @@ def ensure_local_schema() -> None:
         return
 
     inspector = inspect(engine)
+    users_columns = (
+        {column["name"] for column in inspector.get_columns("users")}
+        if inspector.has_table("users")
+        else set()
+    )
     documents_columns = {
         column["name"] for column in inspector.get_columns("documents")
     } if inspector.has_table("documents") else set()
+    document_permissions_columns = (
+        {column["name"] for column in inspector.get_columns("document_permissions")}
+        if inspector.has_table("document_permissions")
+        else set()
+    )
+    document_versions_columns = (
+        {column["name"] for column in inspector.get_columns("document_versions")}
+        if inspector.has_table("document_versions")
+        else set()
+    )
     ai_interactions_columns = {
         column["name"] for column in inspector.get_columns("ai_interactions")
     } if inspector.has_table("ai_interactions") else set()
@@ -53,8 +68,14 @@ def ensure_local_schema() -> None:
         and inspector.has_table("document_permissions")
         and inspector.has_table("document_versions")
         and inspector.has_table("ai_interactions")
+        and {"email", "name", "password_hash", "created_at"}.issubset(users_columns)
         and "owner_id" in documents_columns
+        and {"document_id", "user_id", "role"}.issubset(document_permissions_columns)
+        and {"document_id", "label", "content", "created_at"}.issubset(document_versions_columns)
         and "user_id" in ai_interactions_columns
+        and {"feature", "prompt_excerpt", "response_text", "model_name", "status"}.issubset(
+            ai_interactions_columns
+        )
     )
 
     if schema_is_current:
@@ -78,21 +99,26 @@ def seed_demo_users() -> None:
     from app.auth import hash_password
 
     demo_users = [
-    {
-        "email": "owner@example.com",
-        "name": "Owner Demo",
-        "password_hash": hash_password("Password123!"),
-    },
-    {
-        "email": "editor@example.com",
-        "name": "Editor Demo",
-        "password_hash": hash_password("Password123!"),
-    },
-    {
-        "email": "viewer@example.com",
-        "name": "Viewer Demo",
-        "password_hash": hash_password("Password123!"),
-    },
+        {
+            "email": "owner@example.com",
+            "name": "Owner Demo",
+            "password_hash": hash_password("Password123!"),
+        },
+        {
+            "email": "editor@example.com",
+            "name": "Editor Demo",
+            "password_hash": hash_password("Password123!"),
+        },
+        {
+            "email": "commenter@example.com",
+            "name": "Commenter Demo",
+            "password_hash": hash_password("Password123!"),
+        },
+        {
+            "email": "viewer@example.com",
+            "name": "Viewer Demo",
+            "password_hash": hash_password("Password123!"),
+        },
     ]
 
     with SessionLocal() as db:
