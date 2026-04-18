@@ -11,8 +11,7 @@ import {
 } from "react";
 
 import { ApiError, createDocument, deleteDocument, listDocuments } from "@/app/lib/api";
-import { canDeleteDocument, type AccessibleDocument, type DocumentRecord } from "@/app/lib/types";
-import { getAccessibleDocuments } from "@/app/lib/document-access";
+import type { DocumentRecord } from "@/app/lib/types";
 import { formatTimestamp, getExcerpt } from "@/app/lib/ui";
 import { useAuth } from "./auth-provider";
 import AccountMenu from "./account-menu";
@@ -130,9 +129,7 @@ export default function DocumentDashboard() {
     void loadDashboard();
   }, []);
 
-  const accessibleDocuments = getAccessibleDocuments(documents, session?.user.email ?? "");
-
-  const filteredDocuments = accessibleDocuments.filter(({ document }) => {
+  const filteredDocuments = documents.filter((document) => {
     const query = deferredSearch.trim().toLowerCase();
     if (!query) {
       return true;
@@ -303,13 +300,11 @@ export default function DocumentDashboard() {
               <div className="notice notice-info col-span-full">
                 {documents.length === 0
                   ? "No documents exist yet. Create the first one from the draft panel."
-                  : accessibleDocuments.length === 0
-                    ? "No shared or owned documents are available for this account yet."
-                    : "No documents match the current search."}
+                  : "No documents match the current search."}
               </div>
             ) : null}
 
-            {filteredDocuments.map(({ document, role }: AccessibleDocument) => {
+            {filteredDocuments.map((document) => {
               const lines = previewLines(document.content);
 
               return (
@@ -353,22 +348,17 @@ export default function DocumentDashboard() {
                       <div className="flex items-center gap-2">
                         <AppLogo compact />
                         <span>#{document.id}</span>
-                        <span className="pill border-0 bg-[rgba(49,94,138,0.08)] px-3 text-[0.72rem] text-[#315e8a]">
-                          {role}
-                        </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        {canDeleteDocument(role) ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteDocument(document)}
-                            disabled={deletingId === document.id}
-                            className="button-secondary h-9 rounded-full px-3 text-[#9f3d2b] hover:bg-[rgba(159,61,43,0.06)]"
-                          >
-                            <TrashIcon />
-                            <span className="ml-1">{deletingId === document.id ? "Deleting..." : "Delete"}</span>
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteDocument(document)}
+                          disabled={deletingId === document.id}
+                          className="button-secondary h-9 rounded-full px-3 text-[#9f3d2b] hover:bg-[rgba(159,61,43,0.06)]"
+                        >
+                          <TrashIcon />
+                          <span className="ml-1">{deletingId === document.id ? "Deleting..." : "Delete"}</span>
+                        </button>
                       </div>
                     </div>
                   </div>

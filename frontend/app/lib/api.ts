@@ -3,6 +3,8 @@ import { getStoredAccessToken, refreshStoredSession } from "./auth";
 import type {
   AIInteraction,
   AIInvokeResponse,
+  AuthUser,
+  DocumentPermission,
   DocumentRecord,
   DocumentVersion,
   HealthResponse,
@@ -111,14 +113,49 @@ export function listVersions(documentId: number) {
   return apiRequest<DocumentVersion[]>(`/documents/${documentId}/versions`);
 }
 
+export function createVersion(documentId: number, payload: { label?: string }) {
+  return apiRequest<DocumentVersion>(`/documents/${documentId}/versions`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function revertVersion(documentId: number, versionId: number) {
+  return apiRequest<DocumentRecord>(`/documents/${documentId}/versions/${versionId}/revert`, {
+    method: "POST",
+  });
+}
+
 export function deleteDocument(documentId: number) {
   return apiRequest<void>(`/documents/${documentId}`, {
     method: "DELETE",
   });
 }
 
-export function listAiHistory() {
-  return apiRequest<AIInteraction[]>("/ai/history");
+export function listUsers() {
+  return apiRequest<AuthUser[]>("/users");
+}
+
+export function listPermissions(documentId: number) {
+  return apiRequest<DocumentPermission[]>(`/documents/${documentId}/permissions`);
+}
+
+export function upsertPermission(documentId: number, payload: { user_id: number; role: "owner" | "editor" | "viewer" }) {
+  return apiRequest<DocumentPermission>(`/documents/${documentId}/permissions`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function removePermission(documentId: number, userId: number) {
+  return apiRequest<void>(`/documents/${documentId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listAiHistory(documentId?: number) {
+  const query = documentId ? `?document_id=${documentId}` : "";
+  return apiRequest<AIInteraction[]>(`/ai/history${query}`);
 }
 
 type InvokeAiOptions = {

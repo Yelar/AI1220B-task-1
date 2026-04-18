@@ -1,97 +1,20 @@
-import { AUTH_MODE, API_BASE_URL } from "./config";
-import type { AuthFormPayload, AuthSession, AuthTokens, AuthUser, UserRole } from "./types";
+import { API_BASE_URL } from "./config";
+import type { AuthFormPayload, AuthSession, AuthTokens, AuthUser } from "./types";
 
 const authSessionStorageKey = "swp1-auth-session";
-const authUsersStorageKey = "swp1-auth-users";
 
-type StoredUserRecord = {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-  role: UserRole;
-  createdAt: string;
-};
-
-type BackendAuthResponse = {
-  user: AuthUser;
+type TokenResponse = {
   access_token: string;
   refresh_token: string;
-  access_expires_in: number;
-  refresh_expires_in: number;
+  token_type: string;
 };
 
-const demoSeedUser: StoredUserRecord = {
-  id: "user-demo-owner",
-  name: "Demo Owner",
-  email: "owner@local.test",
-  password: "demo12345",
-  role: "owner",
-  createdAt: new Date("2026-04-01T10:00:00Z").toISOString(),
+type RequestOptions = Omit<RequestInit, "body"> & {
+  body?: unknown;
 };
 
 function isBrowser() {
   return typeof window !== "undefined";
-}
-
-function buildLocalTokens() {
-  const now = Date.now();
-  return {
-    accessToken: `local-access-${Math.random().toString(36).slice(2, 12)}`,
-    refreshToken: `local-refresh-${Math.random().toString(36).slice(2, 12)}`,
-    accessExpiresAt: now + 1000 * 60 * 30,
-    refreshExpiresAt: now + 1000 * 60 * 60 * 24 * 7,
-  } satisfies AuthTokens;
-}
-
-function mapStoredUserToSession(user: StoredUserRecord): AuthSession {
-  return {
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-    },
-    tokens: buildLocalTokens(),
-    source: "local",
-  };
-}
-
-function readUsersFromStorage() {
-  if (!isBrowser()) {
-    return [demoSeedUser];
-  }
-
-  const raw = window.localStorage.getItem(authUsersStorageKey);
-  if (!raw) {
-    window.localStorage.setItem(authUsersStorageKey, JSON.stringify([demoSeedUser]));
-    return [demoSeedUser];
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as StoredUserRecord[];
-    return parsed.length > 0 ? parsed : [demoSeedUser];
-  } catch {
-    window.localStorage.setItem(authUsersStorageKey, JSON.stringify([demoSeedUser]));
-    return [demoSeedUser];
-  }
-}
-
-export function listKnownAuthUsers() {
-  return readUsersFromStorage().map<AuthUser>((user) => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  }));
-}
-
-function writeUsersToStorage(users: StoredUserRecord[]) {
-  if (!isBrowser()) {
-    return;
-  }
-
-  window.localStorage.setItem(authUsersStorageKey, JSON.stringify(users));
 }
 
 function persistSession(session: AuthSession | null) {
@@ -107,40 +30,66 @@ function persistSession(session: AuthSession | null) {
   window.localStorage.setItem(authSessionStorageKey, JSON.stringify(session));
 }
 
-async function backendAuthRequest(path: string, payload: AuthFormPayload | { refresh_token: string }) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const raw = await response.text();
-  const data = raw ? (JSON.parse(raw) as { detail?: string } | BackendAuthResponse) : null;
-
-  if (!response.ok) {
-    const detail =
-      typeof (data as { detail?: string } | null)?.detail === "string"
-        ? (data as { detail: string }).detail
-        : "Authentication request failed.";
-    throw new Error(detail);
-  }
-
-  return data as BackendAuthResponse;
-}
-
-function mapBackendSession(data: BackendAuthResponse): AuthSession {
+function buildTokens(data: TokenResponse): AuthTokens {
   const now = Date.now();
 
   return {
-    user: data.user,
-    tokens: {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      accessExpiresAt: now + data.access_expires_in * 1000,
-      refreshExpiresAt: now + data.refresh_expires_in * 1000,
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    accessExpiresAt: now + 1000 * 60 * 15,
+    refreshExpiresAt: now + 1000 * 60 * 60 * 24 * 7,
+  };
+}
+
+async function parseJson<T>(response: Response): Promise<T> {
+  const raw = await response.text();
+  return raw ? (JSON.parse(raw) as T) : ({} as T);
+}
+
+async function backendRequest<T>(path: string, init: RequestOptions = {}) {
+  const requestBody =
+    init.body === undefined ? undefined : JSON.stringify(init.body);
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
     },
+    body: requestBody,
+  });
+
+  if (!response.ok) {
+    const data = await parseJson<{ detail?: string }>(response).catch(() => null);
+    throw new Error(data?.detail || "Authentication request failed.");
+  }
+
+  return parseJson<T>(response);
+}
+
+async function fetchCurrentUser(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/users/me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const data = await parseJson<{ detail?: string }>(response).catch(() => null);
+    throw new Error(data?.detail || "Failed to load the current user.");
+  }
+
+  return parseJson<AuthUser>(response);
+}
+
+async function buildBackendSession(tokensResponse: TokenResponse): Promise<AuthSession> {
+  const tokens = buildTokens(tokensResponse);
+  const user = await fetchCurrentUser(tokens.accessToken);
+
+  return {
+    user,
+    tokens,
     source: "backend",
   };
 }
@@ -167,60 +116,29 @@ export function getStoredAccessToken() {
   return readStoredSession()?.tokens.accessToken ?? null;
 }
 
-export function getSeedCredentials() {
-  return {
-    email: demoSeedUser.email,
-    password: demoSeedUser.password,
-  };
-}
-
 export async function registerWithAuth(payload: AuthFormPayload) {
-  if (AUTH_MODE === "backend") {
-    const session = mapBackendSession(await backendAuthRequest("/auth/register", payload));
-    persistSession(session);
-    return session;
-  }
+  await backendRequest<AuthUser>("/users/register", {
+    method: "POST",
+    body: {
+      email: payload.email,
+      name: payload.name,
+      password: payload.password,
+    },
+  });
 
-  const users = readUsersFromStorage();
-  const email = payload.email.trim().toLowerCase();
-
-  if (users.some((user) => user.email === email)) {
-    throw new Error("An account with this email already exists.");
-  }
-
-  const user: StoredUserRecord = {
-    id: `user-${Math.random().toString(36).slice(2, 10)}`,
-    name: payload.name?.trim() || email.split("@")[0],
-    email,
-    password: payload.password,
-    role: "owner",
-    createdAt: new Date().toISOString(),
-  };
-
-  const nextUsers = [user, ...users];
-  writeUsersToStorage(nextUsers);
-
-  const session = mapStoredUserToSession(user);
-  persistSession(session);
-  return session;
+  return loginWithAuth(payload);
 }
 
 export async function loginWithAuth(payload: AuthFormPayload) {
-  if (AUTH_MODE === "backend") {
-    const session = mapBackendSession(await backendAuthRequest("/auth/login", payload));
-    persistSession(session);
-    return session;
-  }
+  const tokens = await backendRequest<TokenResponse>("/users/login", {
+    method: "POST",
+    body: {
+      email: payload.email,
+      password: payload.password,
+    },
+  });
 
-  const users = readUsersFromStorage();
-  const email = payload.email.trim().toLowerCase();
-  const user = users.find((candidate) => candidate.email === email);
-
-  if (!user || user.password !== payload.password) {
-    throw new Error("Email or password is incorrect.");
-  }
-
-  const session = mapStoredUserToSession(user);
+  const session = await buildBackendSession(tokens);
   persistSession(session);
   return session;
 }
@@ -236,21 +154,14 @@ export async function refreshStoredSession() {
     return null;
   }
 
-  if (session.source === "backend") {
-    const refreshed = mapBackendSession(
-      await backendAuthRequest("/auth/refresh", {
-        refresh_token: session.tokens.refreshToken,
-      }),
-    );
-    persistSession(refreshed);
-    return refreshed;
-  }
+  const tokens = await backendRequest<TokenResponse>("/users/refresh", {
+    method: "POST",
+    body: {
+      refresh_token: session.tokens.refreshToken,
+    },
+  });
 
-  const refreshed = {
-    ...session,
-    tokens: buildLocalTokens(),
-  } satisfies AuthSession;
-
+  const refreshed = await buildBackendSession(tokens);
   persistSession(refreshed);
   return refreshed;
 }

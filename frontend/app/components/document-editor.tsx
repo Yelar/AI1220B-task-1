@@ -2,22 +2,23 @@
 
 import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from "react";
+import { useCallback } from "react";
 
 import {
+  ApiError,
+  createVersion,
   getDocument,
   invokeAi,
   listAiHistory,
+  listPermissions,
+  listUsers,
   listVersions,
+  removePermission,
+  revertVersion,
+  upsertPermission,
   updateDocument,
 } from "@/app/lib/api";
-import {
-  ensureDocumentAccess,
-  getDocumentRole,
-  listDocumentShares,
-  removeDocumentShare,
-  setDocumentShare,
-} from "@/app/lib/document-access";
-import { listKnownAuthUsers } from "@/app/lib/auth";
+import { WS_BASE_URL } from "@/app/lib/config";
 import { formatTimestamp, stripHtml } from "@/app/lib/ui";
 import {
   canCreateVersions,
@@ -27,6 +28,7 @@ import {
   canUseAi,
   type AIInteraction,
   type AIFeature,
+  type AuthUser,
   type DocumentRecord,
   type DocumentShare,
   type DocumentVersion,
@@ -41,6 +43,15 @@ import RichTextEditor, {
 } from "./rich-text-editor";
 
 type AiState = "idle" | "loading" | "revealing" | "ready" | "cancelled" | "error";
+type ConnectionState = "connecting" | "live" | "reconnecting" | "offline";
+
+type PresenceParticipant = {
+  userId: string;
+  userName: string;
+  clientId: string;
+  cursor?: Record<string, unknown> | null;
+  selection?: Record<string, unknown> | null;
+};
 
 const aiFeatures: Array<{ value: AIFeature; label: string }> = [
   { value: "rewrite", label: "Rewrite" },
@@ -181,6 +192,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [dirty, setDirty] = useState(false);
   const [documentRole, setDocumentRole] = useState<UserRole>("owner");
   const [shares, setShares] = useState<DocumentShare[]>([]);
+  const [knownUsers, setKnownUsers] = useState<AuthUser[]>([]);
   const [shareEmail, setShareEmail] = useState("");
   const [shareRole, setShareRole] = useState<Exclude<UserRole, "owner">>("viewer");
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -202,14 +214,24 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [lastAppliedSnapshot, setLastAppliedSnapshot] = useState<string | null>(null);
   const [showSharingPanel, setShowSharingPanel] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(false);
+  const [participants, setParticipants] = useState<PresenceParticipant[]>([]);
+  const [activityByClient, setActivityByClient] = useState<Record<string, { label: string; at: number }>>({});
+  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
 
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const revealTimerRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const revealRunRef = useRef(0);
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const typingTimerRef = useRef<number | null>(null);
+  const clientIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `client-${Date.now()}`
+  );
 
   const currentUserEmail = session?.user.email ?? "";
-  const knownUsers = listKnownAuthUsers();
 
   function clearRevealTimer() {
     if (revealTimerRef.current !== null) {
@@ -247,24 +269,83 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     step();
   }
 
-  async function loadVersionsForDocument(currentDocumentId: number) {
+  const loadVersionsForDocument = useCallback(async (currentDocumentId: number) => {
     setVersionsLoading(true);
     try {
       setVersions(await listVersions(currentDocumentId));
     } finally {
       setVersionsLoading(false);
     }
-  }
+  }, []);
 
-  async function loadAiHistoryForDocument(currentDocumentId: number) {
+  const loadAiHistoryForDocument = useCallback(async (currentDocumentId: number) => {
     setAiHistoryLoading(true);
     try {
-      const history = await listAiHistory();
-      setAiHistory(history.filter((entry) => entry.document_id === currentDocumentId));
+      setAiHistory(await listAiHistory(currentDocumentId));
     } finally {
       setAiHistoryLoading(false);
     }
+  }, []);
+
+  function normalizeRole(role: string | null | undefined): UserRole {
+    return role === "owner" || role === "editor" || role === "viewer" ? role : "viewer";
   }
+
+  const detectDocumentRole = useCallback(async (currentDocumentId: number) => {
+    try {
+      await listPermissions(currentDocumentId);
+      return "owner" satisfies UserRole;
+    } catch (requestError) {
+      if (!(requestError instanceof ApiError) || requestError.status !== 403) {
+        throw requestError;
+      }
+    }
+
+    try {
+      await updateDocument(currentDocumentId, {});
+      return "editor" satisfies UserRole;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 403) {
+        return "viewer" satisfies UserRole;
+      }
+      throw requestError;
+    }
+  }, []);
+
+  const loadUsersAndShares = useCallback(async (currentDocumentId: number, role: UserRole) => {
+    const users = await listUsers();
+    setKnownUsers(users);
+
+    if (role !== "owner") {
+      setShares([]);
+      return;
+    }
+
+    const permissions = await listPermissions(currentDocumentId);
+    const mappedShares: DocumentShare[] = permissions
+      .filter((permission) => permission.role !== "owner")
+      .map((permission) => {
+        const user = users.find((entry) => entry.id === permission.user_id);
+        return {
+          user_id: permission.user_id,
+          name: user?.name ?? `User ${permission.user_id}`,
+          email: user?.email ?? `user-${permission.user_id}@unknown.local`,
+          role: normalizeRole(permission.role) as Exclude<UserRole, "owner">,
+        };
+      });
+
+    setShares(mappedShares);
+  }, []);
+
+  const updateActivity = useCallback((clientId: string, label: string) => {
+    setActivityByClient((current) => ({
+      ...current,
+      [clientId]: {
+        label,
+        at: Date.now(),
+      },
+    }));
+  }, []);
 
   useEffect(() => {
     if (!Number.isFinite(documentId) || documentId <= 0 || !currentUserEmail) {
@@ -281,12 +362,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
       try {
         const currentDocument = await getDocument(documentId);
-        ensureDocumentAccess(currentDocument.id, currentUserEmail);
-        const nextRole = getDocumentRole(currentDocument.id, currentUserEmail, currentUserEmail);
-
-        if (!nextRole) {
-          throw new Error("You do not have access to this document.");
-        }
+        const nextRole = await detectDocumentRole(currentDocument.id);
 
         if (!active) {
           return;
@@ -294,16 +370,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
         setDocument(currentDocument);
         setDocumentRole(nextRole);
-        setShares(listDocumentShares(currentDocument.id, currentUserEmail));
         setTitle(currentDocument.title);
         setContent(currentDocument.content);
         setPlainTextSnapshot(stripHtml(currentDocument.content));
         setDirty(false);
         setSavingState("saved");
-
         await Promise.all([
           loadVersionsForDocument(currentDocument.id),
           loadAiHistoryForDocument(currentDocument.id),
+          loadUsersAndShares(currentDocument.id, nextRole),
         ]);
       } catch (requestError) {
         const message =
@@ -324,8 +399,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       active = false;
       abortControllerRef.current?.abort();
       clearRevealTimer();
+      socketRef.current?.close();
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+      if (typingTimerRef.current !== null) {
+        window.clearTimeout(typingTimerRef.current);
+      }
     };
-  }, [currentUserEmail, documentId]);
+  }, [currentUserEmail, detectDocumentRole, documentId, loadAiHistoryForDocument, loadUsersAndShares, loadVersionsForDocument]);
 
   useEffect(() => {
     setPlainTextSnapshot(stripHtml(content));
@@ -384,6 +466,10 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     try {
       await persistDocument();
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 403) {
+        setDocumentRole("viewer");
+        setSaveMessage(null);
+      }
       const message =
         requestError instanceof Error ? requestError.message : "Failed to save document.";
       setError(message);
@@ -395,8 +481,17 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     void handleSaveDocument();
   });
 
+  const sendSocketMessage = useEffectEvent((payload: Record<string, unknown>) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(payload));
+    }
+  });
+
+  const currentDocumentId = document?.id ?? null;
+  const currentUser = session?.user ?? null;
+
   useEffect(() => {
-    if (!dirty || !document || !canEdit(documentRole)) {
+    if (!dirty || !currentDocumentId || !canEdit(documentRole)) {
       return;
     }
 
@@ -405,7 +500,120 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }, 1400);
 
     return () => clearTimeout(timer);
-  }, [content, dirty, document, documentRole, title]);
+  }, [content, currentDocumentId, dirty, documentRole, title]);
+
+  useEffect(() => {
+    if (!currentDocumentId || !currentUser) {
+      return;
+    }
+
+    let closedByEffect = false;
+
+    const connect = () => {
+      setConnectionState(socketRef.current ? "reconnecting" : "connecting");
+      const params = new URLSearchParams({
+        userId: String(currentUser.id),
+        userName: currentUser.name,
+        clientId: clientIdRef.current,
+      });
+
+      const socket = new WebSocket(`${WS_BASE_URL}/documents/${currentDocumentId}?${params.toString()}`);
+      socketRef.current = socket;
+
+      socket.addEventListener("open", () => {
+        setConnectionState("live");
+        sendSocketMessage({
+          type: "presence:update",
+          selection: selectedText
+            ? {
+                length: selectedText.length,
+              }
+            : null,
+        });
+      });
+
+      socket.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data) as {
+            type?: string;
+            participants?: PresenceParticipant[];
+            sender?: { clientId?: string; userName?: string };
+          };
+
+          if (payload.type === "connection:ack" || payload.type === "presence:sync") {
+            setParticipants((payload.participants ?? []).filter((entry) => entry.clientId !== clientIdRef.current));
+            return;
+          }
+
+          if (payload.type === "document:update" && payload.sender?.clientId && payload.sender.clientId !== clientIdRef.current) {
+            updateActivity(payload.sender.clientId, `${payload.sender.userName ?? "Collaborator"} is typing`);
+          }
+        } catch {
+          // ignore malformed websocket payloads in the frontend
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        setParticipants([]);
+        socketRef.current = null;
+        if (closedByEffect) {
+          setConnectionState("offline");
+          return;
+        }
+
+        setConnectionState("reconnecting");
+        reconnectTimerRef.current = window.setTimeout(connect, 1500);
+      });
+    };
+
+    connect();
+
+    return () => {
+      closedByEffect = true;
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      socketRef.current?.close();
+      socketRef.current = null;
+    };
+  }, [currentDocumentId, currentUser, selectedText, updateActivity]);
+
+  useEffect(() => {
+    if (!currentDocumentId || !canEdit(documentRole) || !dirty) {
+      return;
+    }
+
+    if (typingTimerRef.current !== null) {
+      window.clearTimeout(typingTimerRef.current);
+    }
+
+    typingTimerRef.current = window.setTimeout(() => {
+      sendSocketMessage({
+        type: "document:update",
+        payload: {
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }, 280);
+
+    return () => {
+      if (typingTimerRef.current !== null) {
+        window.clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = null;
+      }
+    };
+  }, [content, currentDocumentId, dirty, documentRole]);
+
+  const remoteParticipants = participants.map((participant) => {
+    const activity = activityByClient[participant.clientId];
+    const isTyping = activity && Date.now() - activity.at < 3500;
+
+    return {
+      ...participant,
+      activityLabel: isTyping ? activity.label : "Online",
+    };
+  });
 
   async function handleSaveVersion() {
     if (!document || !canCreateVersions(documentRole)) {
@@ -417,14 +625,16 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setError(null);
 
     try {
-      await persistDocument({
-        create_version: true,
-        version_label: versionLabel.trim() || `Snapshot ${createVersionLabel()}`,
+      await createVersion(document.id, {
+        label: versionLabel.trim() || `Snapshot ${createVersionLabel()}`,
       });
       await loadVersionsForDocument(document.id);
       setVersionLabel("");
       setVersionFeedback("Version saved.");
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 403) {
+        setDocumentRole("viewer");
+      }
       const message =
         requestError instanceof Error ? requestError.message : "Failed to save version.";
       setError(message);
@@ -443,13 +653,9 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setError(null);
 
     try {
-      const savedDocument = await updateDocument(document.id, {
-        title,
-        content: version.content,
-        create_version: true,
-        version_label: `Restored from ${version.label ?? formatTimestamp(version.created_at)}`,
-      });
+      const savedDocument = await revertVersion(document.id, version.id);
       setDocument(savedDocument);
+      setTitle(savedDocument.title);
       setContent(savedDocument.content);
       setPlainTextSnapshot(stripHtml(savedDocument.content));
       setDirty(false);
@@ -457,6 +663,9 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setSaveMessage(`Restored ${version.label ?? formatTimestamp(version.created_at)}.`);
       await loadVersionsForDocument(document.id);
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 403) {
+        setDocumentRole("viewer");
+      }
       const message =
         requestError instanceof Error ? requestError.message : "Failed to restore version.";
       setError(message);
@@ -465,7 +674,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
   }
 
-  function handleShareDocument(event: FormEvent) {
+  async function handleShareDocument(event: FormEvent) {
     event.preventDefault();
     if (!document || !canManageSharing(documentRole)) {
       return;
@@ -482,20 +691,41 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       return;
     }
 
-    const nextShares = setDocumentShare(document.id, currentUserEmail, nextEmail, shareRole);
-    setShares(nextShares);
-    setShareEmail("");
-    setShareFeedback(`Shared with ${nextEmail} as ${shareRole}.`);
-    setShareError(null);
+    const targetUser = knownUsers.find((user) => user.email.toLowerCase() === nextEmail);
+    if (!targetUser) {
+      setShareError("No user with this email exists.");
+      return;
+    }
+
+    try {
+      await upsertPermission(document.id, {
+        user_id: targetUser.id,
+        role: shareRole,
+      });
+      await loadUsersAndShares(document.id, "owner");
+      setShareEmail("");
+      setShareFeedback(`Shared with ${nextEmail} as ${shareRole}.`);
+      setShareError(null);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to share the document.";
+      setShareError(message);
+    }
   }
 
-  function handleRemoveShare(email: string) {
+  async function handleRemoveShare(share: DocumentShare) {
     if (!document || !canManageSharing(documentRole)) {
       return;
     }
 
-    const nextShares = removeDocumentShare(document.id, currentUserEmail, email);
-    setShares(nextShares);
+    try {
+      await removePermission(document.id, share.user_id);
+      await loadUsersAndShares(document.id, "owner");
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to remove access.";
+      setShareError(message);
+    }
   }
 
   async function handleGenerateAi() {
@@ -534,6 +764,9 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       startReveal(response.output_text);
       await loadAiHistoryForDocument(document.id);
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 403) {
+        setDocumentRole("viewer");
+      }
       if (requestError instanceof DOMException && requestError.name === "AbortError") {
         setAiState("cancelled");
         return;
@@ -754,6 +987,18 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 onSelectionChange={({ plainText, selectedText: nextSelectedText }) => {
                   setPlainTextSnapshot(plainText);
                   setSelectedText(nextSelectedText);
+                  if (socketRef.current?.readyState === WebSocket.OPEN) {
+                    socketRef.current.send(
+                      JSON.stringify({
+                        type: "presence:update",
+                        selection: nextSelectedText
+                          ? {
+                              length: nextSelectedText.length,
+                            }
+                          : null,
+                      })
+                    );
+                  }
                 }}
                 placeholder="Start writing here."
               />
@@ -776,6 +1021,41 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 <div className="text-[0.68rem] uppercase tracking-[0.2em] text-slate-400">Updated</div>
                 <div className="mt-1 text-sm font-medium text-slate-800">{lastUpdated}</div>
               </div>
+              <div className="rounded-[1.1rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-3 py-2.5">
+                <div className="text-[0.68rem] uppercase tracking-[0.2em] text-slate-400">Connection</div>
+                <div className="mt-1 text-sm font-medium text-slate-800">
+                  {connectionState === "live"
+                    ? "Live"
+                    : connectionState === "connecting"
+                      ? "Connecting"
+                      : connectionState === "reconnecting"
+                        ? "Reconnecting"
+                        : "Offline"}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="surface-card rounded-[1.8rem] p-4">
+            <div className="text-[0.68rem] uppercase tracking-[0.2em] text-slate-400">Collaborators</div>
+            <div className="mt-3 space-y-3">
+              {remoteParticipants.length === 0 ? (
+                <div className="rounded-[1.1rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-3 py-3 text-sm text-slate-500">
+                  No other active users in this document right now.
+                </div>
+              ) : (
+                remoteParticipants.map((participant) => (
+                  <div
+                    key={participant.clientId}
+                    className="rounded-[1.1rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-3 py-3"
+                  >
+                    <div className="text-sm font-medium text-slate-800">{participant.userName}</div>
+                    <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {participant.activityLabel}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </section>
         </aside>
@@ -816,17 +1096,18 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
                   {shares.map((share) => (
                     <div
-                      key={share.email}
+                      key={share.user_id}
                       className="flex items-center justify-between gap-3 rounded-2xl border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-4 py-3"
                     >
                       <div>
-                        <div className="text-sm font-medium text-slate-800">{share.email}</div>
+                        <div className="text-sm font-medium text-slate-800">{share.name}</div>
+                        <div className="mt-1 text-sm text-slate-500">{share.email}</div>
                         <div className="text-xs uppercase tracking-[0.2em] text-slate-400">{share.role}</div>
                       </div>
                       {canManageSharing(documentRole) ? (
                         <button
                           type="button"
-                          onClick={() => handleRemoveShare(share.email)}
+                          onClick={() => void handleRemoveShare(share)}
                           className="button-secondary h-9 rounded-full px-3 text-sm"
                         >
                           Remove

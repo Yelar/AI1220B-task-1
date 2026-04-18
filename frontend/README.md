@@ -20,7 +20,6 @@ Expected backend services:
 - Document dashboard with create, list, search, and open flows
 - Document editor page with title/content save flow
 - AI suggestion panel for rewrite, summarize, translate, and restructure requests
-- Version list and owner-only snapshot UI
 - Realtime connection status, activity feed, and reconnect handling
 - Role-aware owner, editor, commenter, and viewer UI modes
 
@@ -28,3 +27,4 @@ Expected backend services:
 
 - The backend does not yet expose real auth, role enforcement, or version revert routes.
 - The frontend therefore models roles locally for demo purposes and disables unsupported actions with clear messaging.
+- The current frontend intentionally stays close to the PoC requirements: dashboard, editor, AI panel, and collaboration status without extra product features.

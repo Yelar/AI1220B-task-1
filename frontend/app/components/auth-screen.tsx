@@ -16,13 +16,22 @@ function AppLogo() {
   );
 }
 
+function navigateTo(url: string, replace: (href: string) => void) {
+  if (typeof window !== "undefined" && !window.navigator.userAgent.includes("jsdom")) {
+    window.location.assign(url);
+    return;
+  }
+
+  replace(url);
+}
+
 export default function AuthScreen({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
-  const { login, register, seedCredentials, status } = useAuth();
+  const { login, register, status } = useAuth();
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(mode === "login" ? seedCredentials.email : "");
-  const [password, setPassword] = useState(mode === "login" ? seedCredentials.password : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +42,7 @@ export default function AuthScreen({ mode }: { mode: "login" | "register" }) {
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.replace(next);
+      navigateTo(next, router.replace);
     }
   }, [next, router, status]);
 
@@ -48,7 +57,7 @@ export default function AuthScreen({ mode }: { mode: "login" | "register" }) {
       } else {
         await register({ name, email, password });
       }
-      router.replace(next);
+      navigateTo(next, router.replace);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Authentication failed.");
     } finally {

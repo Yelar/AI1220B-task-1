@@ -11,7 +11,6 @@ import {
 
 import {
   clearStoredSession,
-  getSeedCredentials,
   loginWithAuth,
   logoutFromAuth,
   readStoredSession,
@@ -27,10 +26,6 @@ type AuthContextValue = {
   register: (payload: AuthFormPayload) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
-  seedCredentials: {
-    email: string;
-    password: string;
-  };
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -88,7 +83,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       session,
-      seedCredentials: getSeedCredentials(),
       async login(payload) {
         setStatus("loading");
         const nextSession = await loginWithAuth(payload);

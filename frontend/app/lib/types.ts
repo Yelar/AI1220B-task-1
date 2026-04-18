@@ -5,10 +5,9 @@ export type AIFeature = "rewrite" | "summarize" | "translate" | "restructure";
 export type AuthStatus = "loading" | "authenticated" | "guest";
 
 export type AuthUser = {
-  id: string;
+  id: number;
   name: string;
   email: string;
-  role: UserRole;
 };
 
 export type AuthTokens = {
@@ -21,7 +20,7 @@ export type AuthTokens = {
 export type AuthSession = {
   user: AuthUser;
   tokens: AuthTokens;
-  source: "local" | "backend";
+  source: "backend";
 };
 
 export type AuthFormPayload = {
@@ -39,12 +38,20 @@ export type DocumentRecord = {
 };
 
 export type DocumentShare = {
+  user_id: number;
+  name: string;
   email: string;
   role: Exclude<UserRole, "owner">;
 };
 
 export type AccessibleDocument = {
   document: DocumentRecord;
+};
+
+export type DocumentPermission = {
+  id: number;
+  document_id: number;
+  user_id: number;
   role: UserRole;
 };
 
@@ -72,7 +79,8 @@ export type AIInvokeResponse = {
   output_text: string;
   model_name: string;
   provider: string;
-  status: string;
+  status?: string;
+  mocked?: boolean;
 };
 
 export type HealthResponse = {

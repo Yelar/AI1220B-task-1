@@ -5,6 +5,15 @@ import { useEffect, type ReactNode } from "react";
 
 import { useAuth } from "./auth-provider";
 
+function navigateTo(url: string, replace: (href: string) => void) {
+  if (typeof window !== "undefined" && !window.navigator.userAgent.includes("jsdom")) {
+    window.location.replace(url);
+    return;
+  }
+
+  replace(url);
+}
+
 export default function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const pathname = usePathname();
@@ -17,7 +26,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
     const query = typeof window === "undefined" ? "" : window.location.search;
     const next = `${pathname}${query}`;
-    router.replace(`/login?next=${encodeURIComponent(next)}`);
+    navigateTo(`/login?next=${encodeURIComponent(next)}`, router.replace);
   }, [pathname, router, status]);
 
   if (status !== "authenticated") {
