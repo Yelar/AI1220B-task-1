@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.auth import decode_access_token
 from app.database import get_db
 from app.models import Document, DocumentPermission, DocumentVersion, User
 from app.schemas import (
@@ -16,17 +19,34 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    x_user_id: int | None = Header(default=1, alias="X-User-Id"),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    user = db.get(User, x_user_id)
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token.",
+        )
+
+    token = credentials.credentials
+    try:
+        payload = decode_access_token(token)
+        user_id = int(payload["sub"])
+    except (ValueError, KeyError, TypeError, JWTError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token.",
+        )
+
+    user = db.get(User, user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing X-User-Id header.",
+            detail="Authenticated user no longer exists.",
         )
     return user
 
@@ -62,13 +82,20 @@ def require_document_role(
 def safe_export_filename(title: str, export_format: str) -> str:
     collapsed = "-".join(title.lower().split()) or "document"
     sanitized = "".join(
-        character for character in collapsed if character.isalnum() or character in {"-", "_"}
+        character
+        for character in collapsed
+        if character.isalnum() or character in {"-", "_"}
     ).strip("-_")
     stem = sanitized or "document"
     return f"{stem}.{export_format}"
 
 
-@router.get("", response_model=list[DocumentRead])
+@router.get(
+    "",
+    response_model=list[DocumentRead],
+    summary="List accessible documents",
+    description="Return documents owned by the authenticated user or explicitly shared with them.",
+)
 def list_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -91,7 +118,13 @@ def list_documents(
     return db.scalars(statement).all()
 
 
-@router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=DocumentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a document",
+    description="Create a new document owned by the authenticated user.",
+)
 def create_document(
     payload: DocumentCreate,
     db: Session = Depends(get_db),
@@ -119,7 +152,12 @@ def create_document(
     return document
 
 
-@router.get("/{document_id}", response_model=DocumentRead)
+@router.get(
+    "/{document_id}",
+    response_model=DocumentRead,
+    summary="Get a document",
+    description="Return a single document if the authenticated user has access to it.",
+)
 def get_document(
     document_id: int,
     db: Session = Depends(get_db),
@@ -136,12 +174,16 @@ def get_document(
         document,
         current_user,
         db,
-        {"owner", "editor", "commenter", "viewer"},
+        {"owner", "editor", "viewer"},
     )
     return document
 
 
-@router.get("/{document_id}/export")
+@router.get(
+    "/{document_id}/export",
+    summary="Export a document",
+    description="Export a document as markdown, plain text, or JSON.",
+)
 def export_document(
     document_id: int,
     format: str = Query(default="md"),
@@ -159,7 +201,7 @@ def export_document(
         document,
         current_user,
         db,
-        {"owner", "editor", "commenter", "viewer"},
+        {"owner", "editor", "viewer"},
     )
 
     export_format = format.lower().strip()
@@ -184,14 +226,23 @@ def export_document(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    body = document.content if export_format == "txt" else f"# {document.title}\n\n{document.content}"
+    body = (
+        document.content
+        if export_format == "txt"
+        else f"# {document.title}\n\n{document.content}"
+    )
     return PlainTextResponse(
         body,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
-@router.patch("/{document_id}", response_model=DocumentRead)
+@router.patch(
+    "/{document_id}",
+    response_model=DocumentRead,
+    summary="Update a document",
+    description="Update title or content for a document if the authenticated user has write access.",
+)
 def update_document(
     document_id: int,
     payload: DocumentUpdate,
@@ -227,7 +278,12 @@ def update_document(
     return document
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a document",
+    description="Delete a document if the authenticated user is the owner.",
+)
 def delete_document(
     document_id: int,
     db: Session = Depends(get_db),
@@ -245,7 +301,12 @@ def delete_document(
     db.commit()
 
 
-@router.get("/{document_id}/versions", response_model=list[DocumentVersionRead])
+@router.get(
+    "/{document_id}/versions",
+    response_model=list[DocumentVersionRead],
+    summary="List document versions",
+    description="Return saved versions for a document if the authenticated user can access it.",
+)
 def list_versions(
     document_id: int,
     db: Session = Depends(get_db),
@@ -262,7 +323,7 @@ def list_versions(
         document,
         current_user,
         db,
-        {"owner", "editor", "commenter", "viewer"},
+        {"owner", "editor", "viewer"},
     )
 
     statement = (
@@ -277,6 +338,8 @@ def list_versions(
     "/{document_id}/versions",
     response_model=DocumentVersionRead,
     status_code=status.HTTP_201_CREATED,
+    summary="Create a document version",
+    description="Create a new named snapshot for a document if the authenticated user can edit it.",
 )
 def create_version(
     document_id: int,
@@ -304,7 +367,12 @@ def create_version(
     return version
 
 
-@router.post("/{document_id}/versions/{version_id}/revert", response_model=DocumentRead)
+@router.post(
+    "/{document_id}/versions/{version_id}/revert",
+    response_model=DocumentRead,
+    summary="Restore a previous version",
+    description="Revert a document to a previous saved version if the authenticated user is the owner.",
+)
 def revert_version(
     document_id: int,
     version_id: int,
@@ -350,6 +418,8 @@ def revert_version(
 @router.get(
     "/{document_id}/permissions",
     response_model=list[DocumentPermissionRead],
+    summary="List document permissions",
+    description="Return sharing roles for a document if the authenticated user is the owner.",
 )
 def list_permissions(
     document_id: int,
@@ -377,6 +447,8 @@ def list_permissions(
     "/{document_id}/permissions",
     response_model=DocumentPermissionRead,
     status_code=status.HTTP_201_CREATED,
+    summary="Share a document",
+    description="Create or update a sharing role for a user if the authenticated user is the owner.",
 )
 def upsert_permission(
     document_id: int,
@@ -405,6 +477,12 @@ def upsert_permission(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The document owner must keep the owner role.",
         )
+    
+    if payload.role == "owner" and target_user.id != document.owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ownership transfer is not supported.",
+    )
 
     permission = db.scalar(
         select(DocumentPermission).where(
@@ -432,6 +510,8 @@ def upsert_permission(
 @router.delete(
     "/{document_id}/permissions/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a sharing role",
+    description="Remove a non-owner permission from a document if the authenticated user is the owner.",
 )
 def delete_permission(
     document_id: int,

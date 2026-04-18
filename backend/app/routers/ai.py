@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AIInteraction, Document, DocumentPermission
+from app.models import AIInteraction, Document, DocumentPermission, User
 from app.routers.documents import get_current_user, require_document_role
 from app.schemas import AIInteractionRead, AIInvokeRequest, AIInvokeResponse
 from app.services import generate_ai_suggestion
@@ -24,11 +24,16 @@ def _can_invoke_ai(document: Document, user_id: int, db: Session) -> bool:
     return permission is not None and permission.role in {"owner", "editor"}
 
 
-@router.post("/invoke", response_model=AIInvokeResponse)
+@router.post(
+    "/invoke",
+    response_model=AIInvokeResponse,
+    summary="Invoke the AI assistant",
+    description="Generate an AI suggestion for selected text if the authenticated user has edit access.",
+)
 async def invoke_ai(
     payload: AIInvokeRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     if payload.document_id is not None:
         document = db.get(Document, payload.document_id)
@@ -65,13 +70,18 @@ async def invoke_ai(
     )
 
 
-@router.get("/history", response_model=list[AIInteractionRead])
+@router.get(
+    "/history",
+    response_model=list[AIInteractionRead],
+    summary="List AI interaction history",
+    description="Return AI history for the authenticated user or for a specific accessible document.",
+)
 def list_history(
     document_id: int | None = Query(default=None),
     feature: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     statement = select(AIInteraction)
 
@@ -87,7 +97,7 @@ def list_history(
             document,
             current_user,
             db,
-            {"owner", "editor", "commenter", "viewer"},
+            {"owner", "editor", "viewer"},
         )
         statement = statement.where(AIInteraction.document_id == document_id)
     else:

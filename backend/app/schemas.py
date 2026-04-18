@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-RoleValue = Literal["owner", "editor", "commenter", "viewer"]
+RoleValue = Literal["owner", "editor", "viewer"]
 
 
 class UserRead(BaseModel):
@@ -13,6 +13,27 @@ class UserRead(BaseModel):
     name: str
 
     model_config = {"from_attributes": True}
+
+
+class UserRegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
 
 
 class DocumentBase(BaseModel):

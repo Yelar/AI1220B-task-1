@@ -75,12 +75,24 @@ def get_db():
 
 def seed_demo_users() -> None:
     from app.models import User
+    from app.auth import hash_password
 
     demo_users = [
-        {"email": "owner@example.com", "name": "Owner Demo"},
-        {"email": "editor@example.com", "name": "Editor Demo"},
-        {"email": "commenter@example.com", "name": "Commenter Demo"},
-        {"email": "viewer@example.com", "name": "Viewer Demo"},
+    {
+        "email": "owner@example.com",
+        "name": "Owner Demo",
+        "password_hash": hash_password("Password123!"),
+    },
+    {
+        "email": "editor@example.com",
+        "name": "Editor Demo",
+        "password_hash": hash_password("Password123!"),
+    },
+    {
+        "email": "viewer@example.com",
+        "name": "Viewer Demo",
+        "password_hash": hash_password("Password123!"),
+    },
     ]
 
     with SessionLocal() as db:
