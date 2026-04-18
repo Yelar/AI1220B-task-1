@@ -116,6 +116,10 @@ export function getStoredAccessToken() {
   return readStoredSession()?.tokens.accessToken ?? null;
 }
 
+export function getAuthSessionStorageKey() {
+  return authSessionStorageKey;
+}
+
 export async function registerWithAuth(payload: AuthFormPayload) {
   await backendRequest<AuthUser>("/users/register", {
     method: "POST",

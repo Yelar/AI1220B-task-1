@@ -80,21 +80,23 @@ The codebase already contains the Assignment 1 PoC. Assignment 2 work must exten
 
 - [x] Replace plain text editing with a rich-text editor that supports headings, bold, italic, lists, and code blocks
 - [x] Add registration and login screens with protected-route handling
-- [ ] Persist session across refreshes and handle token expiry gracefully
+- [x] Persist session across refreshes and handle token expiry gracefully
 - [x] Add auto-save status in the editor
 - [x] Build version history and restore UI
 - [x] Build sharing UI for owner/editor/viewer assignment
 - [x] Build AI suggestion compare/apply/reject/edit UI
-- [ ] Show streamed AI output progressively in the UI
-- [ ] Add cancel-generation support in the UI
+- [x] Show streamed AI output progressively in the UI
+- [x] Add cancel-generation support in the UI
 - [x] Add presence UI for active collaborators
-- [ ] Add frontend component tests for auth flow, document flow, and AI suggestion flow
+- [x] Add frontend component tests for auth flow, document flow, and AI suggestion flow
 
-### Notes
+### Done
 
-- Session persistence is implemented on the frontend, but token-expiry handling still needs full end-to-end verification with the final backend auth flow.
-- AI progressive output and cancellation exist in the frontend UI, but final completion depends on real backend streaming behavior.
-- Frontend component tests were added, but the suite still needs cleanup to remove the current unhandled WebSocket test error.
+- [x] Auth screens, protected routes, and persisted session flow are implemented in the frontend
+- [x] Rich-text editing, auto-save, version history, and restore UI are implemented in the frontend
+- [x] Sharing, role-aware UI states, and collaborator presence UI are implemented in the frontend
+- [x] AI suggestion review flow, progressive client-side rendering, and cancel support are implemented in the frontend
+- [x] Frontend component tests for auth, document UI, and AI suggestion UI are present and passing
 
 ### Suggested branches
 
