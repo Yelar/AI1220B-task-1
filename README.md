@@ -1,32 +1,76 @@
-# AI1220B Task 1 Submission
+# Collaborative Document Editor with AI Writing Assistant
 
-This submission contains:
+## Overview
 
-- `frontend/`: Next.js document dashboard and editor UI.
-- `backend/`: FastAPI backend with local SQLite persistence, role checks, versioning, collaboration, and LM Studio integration.
-- `diagrams/`: editable Mermaid source files used in the report.
-- `report.pdf`, `meeting_log.md`, `team-task-division.md`: supporting assignment documentation.
+This project implements a collaborative document editor with an AI writing assistant.
 
-## What This PoC Demonstrates
+It is built using:
+- **Frontend:** Next.js (React)
+- **Backend:** FastAPI
+- **Database:** SQLite (local-first)
+- **AI:** LM Studio (local LLM)
 
-- A working Next.js frontend connected to a FastAPI backend.
-- Local-first setup with SQLite and LM Studio, with optional mock AI mode for local testing.
-- Document creation, editing, saving, and deletion.
-- Role-based access behavior using local demo users.
-- Version snapshot creation and version revert.
-- AI-assisted rewrite, summarize, translate, and restructure flows through LM Studio.
-- Basic collaboration signaling over WebSockets.
+The system supports document editing, versioning, sharing, and AI-assisted writing, with secure authentication and backend testing.
 
-## What It Intentionally Does Not Implement Yet
+---
 
-- Production-grade authentication such as passwords, OAuth, or JWT sessions.
-- Full operational-transform or CRDT-based collaborative editing.
-- Production deployment infrastructure or cloud-hosted services.
-- Comprehensive frontend automated tests.
+## Features
+
+### Authentication
+- User registration and login
+- Secure password hashing using bcrypt
+- JWT-based authentication
+- Access and refresh tokens
+- Protected API endpoints
+
+### Document Management
+- Create, read, update, and delete documents
+- Version history with restore functionality
+- Automatic version creation
+- Export documents (txt, markdown, JSON)
+
+### Access Control
+- Role-based permissions:
+  - Owner
+  - Editor
+  - Viewer
+- Server-side enforcement of permissions
+- Document sharing between users
+
+### AI Writing Assistant
+- Supports:
+  - Rewrite
+  - Summarize
+  - Translate
+  - Restructure
+- Uses LM Studio local API
+- Logs AI interaction history
+- Context-aware prompt construction
+- Safe output sanitization
+
+### Real-Time Collaboration
+- WebSocket-based updates
+- Presence tracking
+- Basic real-time document updates (last-write-wins)
+
+### Testing
+- Backend tests using pytest
+- Covers authentication, permissions, document CRUD, AI functionality, and WebSocket behavior
+
+---
+
+## Project Structure
+AI1220B-task-1/
+├── run.sh
+├── README.md
+├── DEVIATIONS.md
+├── backend/
+├── frontend/
 
 ## Local setup
 
-### 1. Start the backend
+
+### Run Backend
 
 ```bash
 cd backend
@@ -36,6 +80,7 @@ pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
+
 
 ### 2. Start LM Studio or enable mock mode
 
@@ -83,20 +128,20 @@ Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000
 - `WS /ws/documents/{document_id}`
 
 
-## Backend Setup
-
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-
-API docs available at:
-http://127.0.0.1:8000/docs
-
 Authentication:
 - Register → Login → Authorize using Bearer token
 
+## Environment Configuration
+
+- Create a .env file in backend/ based on .env.example.
+
+Example:
+
+JWT_SECRET_KEY=change-me-access-secret
+JWT_REFRESH_SECRET_KEY=change-me-refresh-secret
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_MINUTES=10080
 
 
 ## Troubleshooting
