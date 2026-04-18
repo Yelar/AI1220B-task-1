@@ -2,6 +2,16 @@ export type UserRole = "owner" | "editor" | "commenter" | "viewer";
 
 export type AIFeature = "rewrite" | "summarize" | "translate" | "restructure";
 
+export type AIInteractionStatus =
+  | "streaming"
+  | "completed"
+  | "accepted"
+  | "rejected"
+  | "edited_applied"
+  | "partially_applied"
+  | "cancelled"
+  | "failed";
+
 export type DocumentRecord = {
   id: number;
   title: string;
@@ -39,7 +49,7 @@ export type AIInteraction = {
   prompt_excerpt: string;
   response_text: string;
   model_name: string;
-  status: string;
+  status: AIInteractionStatus;
   created_at: string;
 };
 
@@ -48,8 +58,35 @@ export type AIInvokeResponse = {
   output_text: string;
   model_name: string;
   provider: string;
-  status: string;
+  status: AIInteractionStatus;
   mocked?: boolean;
+  interaction_id?: number | null;
+};
+
+export type AIStreamStartEvent = {
+  interaction_id: number;
+  feature: AIFeature;
+  provider: string;
+  model_name: string;
+};
+
+export type AIStreamChunkEvent = {
+  interaction_id: number;
+  delta: string;
+  text: string;
+};
+
+export type AIStreamDoneEvent = {
+  interaction_id: number;
+  feature: AIFeature;
+  output_text: string;
+  provider: string;
+  model_name: string;
+};
+
+export type AIStreamErrorEvent = {
+  interaction_id: number;
+  message: string;
 };
 
 export type HealthResponse = {

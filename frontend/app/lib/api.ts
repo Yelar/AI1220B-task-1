@@ -1,6 +1,11 @@
 import { API_BASE_URL } from "./config";
 import type {
+  AIInteractionStatus,
   AIInteraction,
+  AIStreamChunkEvent,
+  AIStreamDoneEvent,
+  AIStreamErrorEvent,
+  AIStreamStartEvent,
   AIInvokeResponse,
   DemoUser,
   DocumentPermission,
@@ -18,6 +23,13 @@ type ErrorShape = {
   detail?: string;
 };
 
+type StreamAiCallbacks = {
+  onStart?: (event: AIStreamStartEvent) => void;
+  onChunk?: (event: AIStreamChunkEvent) => void;
+  onDone?: (event: AIStreamDoneEvent) => void;
+  onError?: (event: AIStreamErrorEvent) => void;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -28,15 +40,40 @@ export class ApiError extends Error {
   }
 }
 
-async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+function buildRequestHeaders(extraHeaders?: HeadersInit, includeJsonContentType = true) {
   const identity = getDemoIdentityFromStoredRole();
+  const headers = new Headers(extraHeaders ?? {});
+  headers.set("X-User-Id", String(identity.userId));
+
+  if (includeJsonContentType && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return headers;
+}
+
+async function readResponseError(response: Response) {
+  const rawBody = await response.text();
+  if (!rawBody) {
+    return `Request failed with status ${response.status}.`;
+  }
+
+  try {
+    const parsed = JSON.parse(rawBody) as ErrorShape;
+    if (typeof parsed.detail === "string") {
+      return parsed.detail;
+    }
+  } catch {
+    // Fall back to the raw body when the payload is not JSON.
+  }
+
+  return rawBody;
+}
+
+async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": String(identity.userId),
-      ...(options.headers ?? {}),
-    },
+    headers: buildRequestHeaders(options.headers),
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
   });
@@ -60,33 +97,89 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
 }
 
 async function downloadRequest(path: string): Promise<Blob> {
-  const identity = getDemoIdentityFromStoredRole();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      "X-User-Id": String(identity.userId),
+      ...Object.fromEntries(buildRequestHeaders(undefined, false).entries()),
     },
     cache: "no-store",
   });
 
   if (!response.ok) {
-    const rawBody = await response.text();
-    let message = `Request failed with status ${response.status}.`;
-
-    if (rawBody) {
-      try {
-        const parsed = JSON.parse(rawBody) as ErrorShape;
-        if (typeof parsed.detail === "string") {
-          message = parsed.detail;
-        }
-      } catch {
-        message = rawBody;
-      }
-    }
-
-    throw new ApiError(message, response.status);
+    throw new ApiError(await readResponseError(response), response.status);
   }
 
   return response.blob();
+}
+
+type StreamAiRequest = {
+  feature: "rewrite" | "summarize" | "translate" | "restructure";
+  selected_text: string;
+  surrounding_context: string;
+  target_language?: string;
+  document_id?: number;
+};
+
+function parseSseEventBlock(block: string) {
+  let eventName = "message";
+  const dataLines: string[] = [];
+
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (!dataLines.length) {
+    return null;
+  }
+
+  try {
+    return {
+      event: eventName,
+      data: JSON.parse(dataLines.join("\n")) as
+        | AIStreamStartEvent
+        | AIStreamChunkEvent
+        | AIStreamDoneEvent
+        | AIStreamErrorEvent,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function dispatchStreamEvent(
+  parsed: ReturnType<typeof parseSseEventBlock>,
+  callbacks: StreamAiCallbacks,
+) {
+  if (!parsed) {
+    return;
+  }
+
+  switch (parsed.event) {
+    case "start":
+      callbacks.onStart?.(parsed.data as AIStreamStartEvent);
+      break;
+    case "chunk":
+      callbacks.onChunk?.(parsed.data as AIStreamChunkEvent);
+      break;
+    case "done":
+      callbacks.onDone?.(parsed.data as AIStreamDoneEvent);
+      break;
+    case "error":
+      callbacks.onError?.(parsed.data as AIStreamErrorEvent);
+      break;
+    default:
+      break;
+  }
 }
 
 export function getHealth() {
@@ -207,4 +300,75 @@ export function invokeAi(payload: {
     method: "POST",
     body: payload,
   });
+}
+
+export function updateAiHistoryStatus(
+  interactionId: number,
+  payload: { status: AIInteractionStatus },
+) {
+  return apiRequest(`/ai/history/${interactionId}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function streamAiSuggestion(
+  payload: StreamAiRequest,
+  callbacks: StreamAiCallbacks = {},
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`${API_BASE_URL}/ai/stream`, {
+    method: "POST",
+    headers: buildRequestHeaders(),
+    body: JSON.stringify(payload),
+    signal,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await readResponseError(response), response.status);
+  }
+
+  if (!response.body) {
+    throw new ApiError("Streaming response body is unavailable.", response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex = buffer.indexOf("\n\n");
+
+      while (separatorIndex !== -1) {
+        const block = buffer.slice(0, separatorIndex).trim();
+        buffer = buffer.slice(separatorIndex + 2);
+
+        if (block) {
+          dispatchStreamEvent(parseSseEventBlock(block), callbacks);
+        }
+
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+    }
+
+    const trailingBlock = buffer.trim();
+    if (trailingBlock) {
+      dispatchStreamEvent(parseSseEventBlock(trailingBlock), callbacks);
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }

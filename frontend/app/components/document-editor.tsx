@@ -16,12 +16,13 @@ import {
   deletePermission,
   exportDocument,
   getDocument,
-  invokeAi,
   listAiHistory,
   listPermissions,
   listUsers,
   listVersions,
   revertVersion,
+  streamAiSuggestion,
+  updateAiHistoryStatus,
   upsertPermission,
   updateDocument,
 } from "@/app/lib/api";
@@ -42,6 +43,7 @@ import {
   canUseAi,
   type AIFeature,
   type AIInteraction,
+  type AIInteractionStatus,
   type DemoUser,
   type DocumentPermission,
   type DocumentRecord,
@@ -52,6 +54,20 @@ import RolePicker from "./role-picker";
 
 type ConnectionStatus = "connecting" | "live" | "reconnecting" | "offline" | "error";
 type ShareRoleDraft = UserRole | "none";
+type AiWorkflowPhase = "idle" | "streaming" | "ready" | "error" | "cancelled" | "applied";
+
+type AiSelectionSnapshot = {
+  start: number;
+  end: number;
+  selectedText: string;
+  context: string;
+};
+
+type AiUndoSnapshot = {
+  contentBeforeApply: string;
+  selection: AiSelectionSnapshot;
+  appliedText: string;
+};
 
 type PresenceActor = {
   id: string;
@@ -82,6 +98,14 @@ type SocketMessage =
       type: "presence:sync";
       documentId: string;
       participants: PresenceWire[];
+    }
+  | {
+      type: "document:sync";
+      documentId: string;
+      state: {
+        title?: string;
+        content?: string;
+      } | null;
     }
   | {
       type: "document:update";
@@ -178,6 +202,46 @@ function connectionLabel(status: ConnectionStatus) {
   }
 }
 
+function aiHistoryStatusLabel(status: AIInteractionStatus) {
+  switch (status) {
+    case "streaming":
+      return "Streaming";
+    case "completed":
+      return "Completed";
+    case "accepted":
+      return "Accepted";
+    case "rejected":
+      return "Rejected";
+    case "edited_applied":
+      return "Edited and applied";
+    case "partially_applied":
+      return "Partially applied";
+    case "cancelled":
+      return "Cancelled";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
+
+function aiWorkflowLabel(phase: AiWorkflowPhase) {
+  switch (phase) {
+    case "streaming":
+      return "Streaming";
+    case "ready":
+      return "Ready to review";
+    case "applied":
+      return "Applied";
+    case "cancelled":
+      return "Cancelled";
+    case "error":
+      return "Stream stopped";
+    default:
+      return "Idle";
+  }
+}
+
 function mapParticipant(participant: PresenceWire): PresenceActor {
   const role = getRoleForDemoUserId(participant.userId);
 
@@ -237,9 +301,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [selectedText, setSelectedText] = useState("");
   const [aiFeature, setAiFeature] = useState<AIFeature>("rewrite");
   const [targetLanguage, setTargetLanguage] = useState("Arabic");
-  const [aiResult, setAiResult] = useState("");
-  const [aiBusy, setAiBusy] = useState(false);
+  const [aiWorkflowPhase, setAiWorkflowPhase] = useState<AiWorkflowPhase>("idle");
+  const [aiSelectionSnapshot, setAiSelectionSnapshot] = useState<AiSelectionSnapshot | null>(null);
+  const [aiOriginalSuggestion, setAiOriginalSuggestion] = useState("");
+  const [aiSuggestionDraft, setAiSuggestionDraft] = useState("");
+  const [aiActiveInteractionId, setAiActiveInteractionId] = useState<number | null>(null);
+  const [aiUndoSnapshot, setAiUndoSnapshot] = useState<AiUndoSnapshot | null>(null);
+  const aiAbortControllerRef = useRef<AbortController | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiStatusMessage, setAiStatusMessage] = useState<string | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [presence, setPresence] = useState<PresenceActor[]>([]);
@@ -271,6 +341,12 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   useEffect(() => {
     writeStoredRole(role);
   }, [role]);
+
+  useEffect(() => {
+    return () => {
+      aiAbortControllerRef.current?.abort();
+    };
+  }, []);
 
   async function refreshWorkspaceData(currentDocumentId: number, nextRole: UserRole = role) {
     const requests: Array<Promise<unknown>> = [
@@ -327,7 +403,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setLoading(true);
       setError(null);
       setPresence([]);
-      setAiResult("");
+      setAiPanelOpen(false);
+      setAiWorkflowPhase("idle");
+      setAiSelectionSnapshot(null);
+      setAiOriginalSuggestion("");
+      setAiSuggestionDraft("");
+      setAiActiveInteractionId(null);
+      setAiUndoSnapshot(null);
+      setAiStatusMessage(null);
       setAiError(null);
       setSidebarMessage(null);
       setSidebarError(null);
@@ -421,6 +504,29 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     if (parsed.type === "error") {
       setConnectionStatus("error");
       setRemoteDraftNotice(parsed.message);
+      return;
+    }
+
+    if (parsed.type === "document:sync") {
+      if (parsed.state && !dirty) {
+        setTitle(parsed.state.title ?? "");
+        setContent(parsed.state.content ?? "");
+        setDocument((current) =>
+          current
+            ? {
+                ...current,
+                title: parsed.state?.title ?? current.title,
+                content: parsed.state?.content ?? current.content,
+                updated_at: new Date().toISOString(),
+              }
+            : current,
+        );
+        setRemoteDraftNotice("Synchronized with the latest collaborative document state.");
+      } else if (parsed.state && dirty) {
+        setRemoteDraftNotice(
+          "Reconnected and received the latest collaborative state. Save or refresh to reconcile local edits.",
+        );
+      }
       return;
     }
 
@@ -585,65 +691,232 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
   }
 
+  async function updateAiStatus(interactionId: number | null, status: AIInteractionStatus) {
+    if (!interactionId || !document) {
+      return;
+    }
+
+    try {
+      await updateAiHistoryStatus(interactionId, { status });
+      await refreshWorkspaceData(document.id);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to update AI history.";
+      setAiError(message);
+    }
+  }
+
   async function handleInvokeAi() {
     if (!document || !canUseAi(role)) {
       return;
     }
 
-    if (!selectedText.trim()) {
+    const trimmedSelection = selectedText.trim();
+    if (!trimmedSelection) {
       setAiError("Select part of the document text before invoking AI.");
       return;
     }
 
-    setAiBusy(true);
-    setAiError(null);
-
-    try {
-      const response = await invokeAi({
-        feature: aiFeature,
-        selected_text: selectedText,
-        surrounding_context: getSelectionContext(content, selectionStart, selectionEnd),
-        target_language: aiFeature === "translate" ? targetLanguage : undefined,
-        document_id: document.id,
-      });
-
-      setAiResult(response.output_text);
-      setSaveMessage("AI suggestion ready for review.");
-      await refreshWorkspaceData(document.id);
-    } catch (requestError) {
-      const message =
-        requestError instanceof ApiError
-          ? requestError.message
-          : "AI request failed. Check LM Studio or enable mock mode.";
-      setAiError(message);
-    } finally {
-      setAiBusy(false);
-    }
-  }
-
-  function handleApplySuggestion() {
-    if (!aiResult || !canEdit(role)) {
+    if (aiWorkflowPhase === "streaming") {
       return;
     }
 
-    if (selectionEnd > selectionStart) {
-      setContent((current) => current.slice(0, selectionStart) + aiResult + current.slice(selectionEnd));
-      setSelectionEnd(selectionStart + aiResult.length);
-    } else {
-      setContent((current) => `${current.trimEnd()}\n\n${aiResult}`);
+    aiAbortControllerRef.current?.abort();
+
+    const snapshot: AiSelectionSnapshot = {
+      start: selectionStart,
+      end: selectionEnd,
+      selectedText: trimmedSelection,
+      context: getSelectionContext(content, selectionStart, selectionEnd),
+    };
+
+    const controller = new AbortController();
+    aiAbortControllerRef.current = controller;
+
+    setAiPanelOpen(true);
+    setAiError(null);
+    setAiStatusMessage("Streaming suggestion from LM Studio...");
+    setAiWorkflowPhase("streaming");
+    setAiSelectionSnapshot(snapshot);
+    setAiOriginalSuggestion("");
+    setAiSuggestionDraft("");
+    setAiActiveInteractionId(null);
+    setAiUndoSnapshot(null);
+
+    try {
+      await streamAiSuggestion(
+        {
+          feature: aiFeature,
+          selected_text: snapshot.selectedText,
+          surrounding_context: snapshot.context,
+          target_language: aiFeature === "translate" ? targetLanguage : undefined,
+          document_id: document.id,
+        },
+        {
+          onStart(event) {
+            setAiActiveInteractionId(event.interaction_id);
+            setAiStatusMessage(`Streaming output from ${event.model_name}.`);
+          },
+          onChunk(event) {
+            setAiOriginalSuggestion(event.text);
+            setAiSuggestionDraft(event.text);
+          },
+          onDone(event) {
+            setAiActiveInteractionId(event.interaction_id);
+            setAiOriginalSuggestion(event.output_text);
+            setAiSuggestionDraft(event.output_text);
+            setAiWorkflowPhase("ready");
+            setAiStatusMessage("Suggestion ready to compare, edit, accept, or reject.");
+            setSaveMessage("AI suggestion ready for review.");
+            void updateAiStatus(event.interaction_id, "completed");
+          },
+          onError(event) {
+            setAiWorkflowPhase("error");
+            setAiError(event.message);
+            setAiStatusMessage("Generation stopped early. Partial output is preserved.");
+          },
+        },
+        controller.signal,
+      );
+    } catch (requestError) {
+      if (requestError instanceof ApiError) {
+        setAiWorkflowPhase("error");
+        setAiError(requestError.message);
+        setAiStatusMessage("AI request failed.");
+      } else if (
+        requestError instanceof DOMException &&
+        requestError.name === "AbortError"
+      ) {
+        setAiWorkflowPhase("cancelled");
+        setAiStatusMessage("Generation cancelled. Partial output is preserved.");
+      } else {
+        const message =
+          requestError instanceof Error
+            ? requestError.message
+            : "AI request failed. Check LM Studio or enable mock mode.";
+        setAiWorkflowPhase("error");
+        setAiError(message);
+        setAiStatusMessage("AI request failed.");
+      }
+    } finally {
+      if (aiAbortControllerRef.current === controller) {
+        aiAbortControllerRef.current = null;
+      }
+    }
+  }
+
+  async function handleCancelAiGeneration() {
+    if (aiWorkflowPhase !== "streaming") {
+      return;
     }
 
+    const interactionId = aiActiveInteractionId;
+    aiAbortControllerRef.current?.abort();
+    aiAbortControllerRef.current = null;
+    setAiWorkflowPhase("cancelled");
+    setAiStatusMessage("Generation cancelled. Partial output is preserved.");
+    await updateAiStatus(interactionId, "cancelled");
+  }
+
+  async function handleAcceptSuggestion() {
+    if (!document || !canEdit(role) || !aiSuggestionDraft.trim() || !aiSelectionSnapshot) {
+      return;
+    }
+
+    const replacement = aiSuggestionDraft;
+    const trimmedReplacement = replacement.trim();
+    const previousContent = content;
+    const { start, end } = aiSelectionSnapshot;
+
+    const nextContent =
+      end > start
+        ? `${previousContent.slice(0, start)}${replacement}${previousContent.slice(end)}`
+        : `${previousContent.trimEnd()}\n\n${replacement}`;
+
+    setAiUndoSnapshot({
+      contentBeforeApply: previousContent,
+      selection: aiSelectionSnapshot,
+      appliedText: replacement,
+    });
+    setAiError(null);
+    setContent(nextContent);
+    setDocument((current) =>
+      current
+        ? {
+            ...current,
+            content: nextContent,
+            updated_at: new Date().toISOString(),
+          }
+        : current,
+    );
+    setSelectionStart(start);
+    setSelectionEnd(start + replacement.length);
+    setSelectedText(replacement);
     setDirty(true);
     setDraftSignal(Date.now());
-    setSaveMessage("AI suggestion staged in the editor. Save when ready.");
+    setSaveMessage("AI suggestion applied. Use Undo to restore the previous text.");
+    setAiWorkflowPhase("applied");
+    setAiStatusMessage("Suggestion applied to the document.");
+
+    const nextStatus =
+      trimmedReplacement === aiOriginalSuggestion.trim() ? "accepted" : "edited_applied";
+    await updateAiStatus(aiActiveInteractionId, nextStatus);
 
     if (editorRef.current) {
       editorRef.current.focus();
     }
   }
 
-  function openAiPanel() {
-    setAiPanelOpen(true);
+  async function handleRejectSuggestion() {
+    if (!document || !canUseAi(role)) {
+      return;
+    }
+
+    setAiError(null);
+    setAiSuggestionDraft("");
+    setAiOriginalSuggestion("");
+    setAiWorkflowPhase("idle");
+    setAiStatusMessage("Suggestion rejected.");
+    await updateAiStatus(aiActiveInteractionId, "rejected");
+  }
+
+  function handleUndoAcceptedSuggestion() {
+    if (!document || !canEdit(role) || !aiUndoSnapshot) {
+      return;
+    }
+
+    setContent(aiUndoSnapshot.contentBeforeApply);
+    setDocument((current) =>
+      current
+        ? {
+            ...current,
+            content: aiUndoSnapshot.contentBeforeApply,
+            updated_at: new Date().toISOString(),
+          }
+        : current,
+    );
+    setSelectionStart(aiUndoSnapshot.selection.start);
+    setSelectionEnd(aiUndoSnapshot.selection.end);
+    setSelectedText(aiUndoSnapshot.selection.selectedText);
+    setAiError(null);
+    setDirty(true);
+    setDraftSignal(Date.now());
+    setSaveMessage("Restored the document content before the AI suggestion was applied.");
+    setAiUndoSnapshot(null);
+    setAiWorkflowPhase("ready");
+    setAiStatusMessage("Undo completed.");
+
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+  }
+
+  function handleCloseAiPanel() {
+    if (aiWorkflowPhase === "streaming") {
+      void handleCancelAiGeneration();
+    }
+
+    setAiPanelOpen(false);
   }
 
   async function handleCreateVersion() {
@@ -757,10 +1030,22 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   const lastUpdated = document ? formatTimestamp(document.updated_at) : "Unavailable";
   const saveStateLabel = saving ? "Saving..." : dirty ? "Unsaved changes" : "All changes saved";
-  const selectedTextPreview = selectedText.trim()
-    ? getExcerpt(selectedText.trim(), 110)
+  const currentSelectionText =
+    aiWorkflowPhase === "idle" && !aiSuggestionDraft
+      ? selectedText
+      : aiSelectionSnapshot?.selectedText ?? selectedText;
+  const selectedTextPreview = currentSelectionText.trim()
+    ? getExcerpt(currentSelectionText.trim(), 110)
     : "Highlight text in the page to send it to the AI panel.";
-  const currentSelectionLength = Math.max(0, selectionEnd - selectionStart);
+  const currentSelectionLength =
+    aiWorkflowPhase === "idle" && !aiSuggestionDraft
+      ? Math.max(0, selectionEnd - selectionStart)
+      : Math.max(
+          0,
+          (aiSelectionSnapshot?.end ?? selectionEnd) - (aiSelectionSnapshot?.start ?? selectionStart),
+        );
+  const aiCompareSelectionText = currentSelectionText;
+  const aiPanelStatusLabel = aiWorkflowLabel(aiWorkflowPhase);
 
   if (loading) {
     return (
@@ -828,7 +1113,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
               </span>
               <button
                 type="button"
-                onClick={openAiPanel}
+                onClick={() => setAiPanelOpen(true)}
                 className="button-secondary inline-flex h-11 items-center gap-3 rounded-full px-3 pr-5"
               >
                 <AppLogo compact />
@@ -1031,7 +1316,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="pill border-0 bg-slate-100 text-slate-700">{entry.feature}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="pill border-0 bg-slate-100 text-slate-700">
+                        {entry.feature}
+                      </span>
+                      <span className="pill border-0 bg-[rgba(49,94,138,0.09)] text-[#315e8a]">
+                        {aiHistoryStatusLabel(entry.status)}
+                      </span>
+                    </div>
                     <span className="text-xs text-slate-500">{formatTimestamp(entry.created_at)}</span>
                   </div>
                   <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-400">Prompt excerpt</p>
@@ -1147,7 +1439,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
             type="button"
             aria-label="Close AI assistant"
             className="fixed inset-0 z-30 bg-[rgba(17,17,17,0.18)]"
-            onClick={() => setAiPanelOpen(false)}
+            onClick={handleCloseAiPanel}
           />
           <section className="fixed inset-y-0 right-0 z-40 w-full max-w-[28rem] border-l border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.98)] px-5 py-5 shadow-[-18px_0_42px_rgba(15,23,42,0.14)] backdrop-blur sm:px-6">
             <div className="flex h-full flex-col">
@@ -1163,7 +1455,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setAiPanelOpen(false)}
+                  onClick={handleCloseAiPanel}
                   className="button-subtle h-10 w-10 rounded-full"
                   aria-label="Close AI assistant"
                 >
@@ -1173,15 +1465,22 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
               <div className="mt-5 flex-1 space-y-4 overflow-y-auto pr-1">
                 <div className="rounded-[1.4rem] border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.62)] p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Selected text</div>
-                  <p className="mt-2 text-[0.94rem] leading-6 text-slate-600">{selectedTextPreview}</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                      Selected text
+                    </div>
+                    <span className="pill border-0 bg-white text-slate-700">{aiPanelStatusLabel}</span>
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-[0.94rem] leading-6 text-slate-600">
+                    {selectedTextPreview}
+                  </p>
                 </div>
 
                 <div className="space-y-3">
                   <select
                     value={aiFeature}
                     onChange={(event) => setAiFeature(event.target.value as AIFeature)}
-                    disabled={!canUseAi(role)}
+                    disabled={!canUseAi(role) || aiWorkflowPhase === "streaming"}
                     className="field-select"
                   >
                     {aiFeatures.map((feature) => (
@@ -1195,22 +1494,36 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     <input
                       value={targetLanguage}
                       onChange={(event) => setTargetLanguage(event.target.value)}
-                      disabled={!canUseAi(role)}
+                      disabled={!canUseAi(role) || aiWorkflowPhase === "streaming"}
                       className="field"
                       placeholder="Target language"
                     />
                   ) : null}
 
-                  <button
-                    type="button"
-                    onClick={() => void handleInvokeAi()}
-                    disabled={!canUseAi(role) || aiBusy}
-                    className="button-primary h-12 w-full rounded-full"
-                  >
-                    {aiBusy
-                      ? "Running..."
-                      : `Run ${aiFeatures.find((item) => item.value === aiFeature)?.label}`}
-                  </button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        aiWorkflowPhase === "streaming"
+                          ? void handleCancelAiGeneration()
+                          : void handleInvokeAi()
+                      }
+                      disabled={!canUseAi(role) || (!selectedText.trim() && aiWorkflowPhase !== "streaming")}
+                      className="button-primary h-12 rounded-full"
+                    >
+                      {aiWorkflowPhase === "streaming"
+                        ? "Cancel generation"
+                        : `Run ${aiFeatures.find((item) => item.value === aiFeature)?.label}`}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCloseAiPanel}
+                      className="button-secondary h-12 rounded-full"
+                    >
+                      Close panel
+                    </button>
+                  </div>
 
                   {!canUseAi(role) ? (
                     <div className="notice notice-warn">
@@ -1218,24 +1531,100 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     </div>
                   ) : null}
 
+                  {aiStatusMessage ? <div className="notice notice-info">{aiStatusMessage}</div> : null}
                   {aiError ? <div className="notice notice-error">{aiError}</div> : null}
                 </div>
 
                 <div className="rounded-[1.4rem] border border-[rgba(27,36,48,0.08)] bg-[rgba(255,253,249,0.94)] p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-900">Suggestion</p>
+                    <p className="text-sm font-semibold text-slate-900">Compare suggestion</p>
+                    <span className="pill border-0 bg-slate-100 text-slate-700">
+                      {aiWorkflowPhase === "streaming" ? "Live stream" : "Review"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    <div className="rounded-2xl border border-[rgba(27,36,48,0.08)] bg-white px-4 py-3">
+                      <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Original</div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                        {aiCompareSelectionText.trim()
+                          ? aiCompareSelectionText
+                          : "Select text and run the AI assistant to capture an original comparison."}
+                      </p>
+                    </div>
+
+                    {aiWorkflowPhase === "streaming" ? (
+                      <div className="rounded-2xl border border-[rgba(27,36,48,0.08)] bg-white px-4 py-3">
+                        <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Streaming draft</div>
+                        <div className="mt-2 animate-pulse text-sm text-slate-500">Receiving chunks from LM Studio...</div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {aiSuggestionDraft || "Waiting for the first streamed chunk."}
+                        </p>
+                      </div>
+                    ) : aiSuggestionDraft ? (
+                      <div className="rounded-2xl border border-[rgba(27,36,48,0.08)] bg-white px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                            Editable suggestion
+                          </div>
+                          <span className="pill border-0 bg-slate-100 text-slate-700">
+                            {aiWorkflowPhase === "applied" ? "Applied" : "Editable"}
+                          </span>
+                        </div>
+                        <textarea
+                          value={aiSuggestionDraft}
+                          onChange={(event) => setAiSuggestionDraft(event.target.value)}
+                          className="mt-3 min-h-[9rem] w-full resize-none rounded-2xl border border-[rgba(27,36,48,0.08)] bg-[rgba(244,241,234,0.45)] px-4 py-3 text-sm leading-6 text-slate-800 outline-none"
+                          placeholder="AI output will appear here."
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-[rgba(27,36,48,0.14)] bg-white px-4 py-4">
+                        <p className="text-sm leading-6 text-slate-500">
+                          AI output will appear here after you run a streaming request.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
                     <button
                       type="button"
-                      onClick={handleApplySuggestion}
-                      disabled={!aiResult || !canEdit(role)}
+                      onClick={() => void handleAcceptSuggestion()}
+                      disabled={
+                        !canEdit(role) ||
+                        !aiSuggestionDraft.trim() ||
+                        aiWorkflowPhase === "streaming" ||
+                        aiWorkflowPhase === "applied"
+                      }
                       className="button-secondary rounded-full px-4 py-2"
                     >
-                      Apply
+                      {aiSuggestionDraft.trim() !== aiOriginalSuggestion.trim()
+                        ? "Apply edited suggestion"
+                        : "Apply suggestion"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRejectSuggestion()}
+                      disabled={
+                        !canUseAi(role) ||
+                        aiWorkflowPhase === "streaming" ||
+                        aiWorkflowPhase === "applied" ||
+                        (!aiSuggestionDraft && !aiOriginalSuggestion)
+                      }
+                      className="button-subtle rounded-full px-4 py-2"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUndoAcceptedSuggestion}
+                      disabled={!aiUndoSnapshot || !canEdit(role) || aiWorkflowPhase !== "applied"}
+                      className="button-subtle rounded-full px-4 py-2"
+                    >
+                      Undo apply
                     </button>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
-                    {aiResult || "AI output will appear here after you run an action."}
-                  </p>
                 </div>
               </div>
             </div>
