@@ -5,6 +5,16 @@ from pydantic import BaseModel, Field
 
 
 RoleValue = Literal["owner", "editor", "viewer"]
+AIInteractionStatus = Literal[
+    "streaming",
+    "completed",
+    "accepted",
+    "rejected",
+    "edited_applied",
+    "partially_applied",
+    "cancelled",
+    "failed",
+]
 
 
 class UserRead(BaseModel):
@@ -103,6 +113,11 @@ class AIInvokeResponse(BaseModel):
     provider: str = "lm-studio"
     status: str = "completed"
     mocked: bool = False
+    interaction_id: int | None = None
+
+
+class AIInteractionStatusUpdate(BaseModel):
+    status: AIInteractionStatus
 
 
 class AIInteractionRead(BaseModel):
@@ -113,7 +128,7 @@ class AIInteractionRead(BaseModel):
     prompt_excerpt: str
     response_text: str
     model_name: str
-    status: str
+    status: AIInteractionStatus
     created_at: datetime
 
     model_config = {"from_attributes": True}

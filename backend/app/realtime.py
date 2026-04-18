@@ -23,6 +23,7 @@ class ConnectionState:
 class ConnectionManager:
     def __init__(self) -> None:
         self._rooms: dict[str, dict[str, ConnectionState]] = defaultdict(dict)
+        self._document_state: dict[str, dict[str, Any]] = {}
 
     async def connect(
         self,
@@ -51,6 +52,12 @@ class ConnectionManager:
         if not room:
             self._rooms.pop(document_id, None)
         return connection.presence if connection else None
+
+    def set_document_state(self, document_id: str, payload: dict[str, Any]) -> None:
+        self._document_state[document_id] = payload
+
+    def get_document_state(self, document_id: str) -> dict[str, Any] | None:
+        return self._document_state.get(document_id)
 
     async def send_to_client(self, websocket: WebSocket, payload: dict[str, Any]) -> None:
         await websocket.send_json(payload)
