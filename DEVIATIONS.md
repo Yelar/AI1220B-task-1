@@ -17,6 +17,7 @@ This document outlines deviations from the Assignment 1 design.
 ## 3. Collaboration
 
 - Used basic WebSocket broadcast (last-write-wins)
+- Removed commenter role to align with Assignment 2 baseline roles (owner, editor, viewer)
 - Did not implement CRDT/OT conflict resolution
 - Reason: Simplifies implementation for assignment scope
 - Impact: Works for demo, not production-grade collaboration
