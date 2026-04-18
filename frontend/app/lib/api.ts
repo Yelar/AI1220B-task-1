@@ -1,14 +1,14 @@
 import { API_BASE_URL } from "./config";
+import { clearStoredSession, getStoredAccessToken, refreshStoredSession } from "./auth";
 import type {
   AIInteraction,
   AIInvokeResponse,
-  DemoUser,
+  AuthUser,
   DocumentPermission,
   DocumentRecord,
   DocumentVersion,
   HealthResponse,
 } from "./types";
-import { getDemoIdentityFromStoredRole } from "./ui";
 
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
@@ -29,17 +29,29 @@ export class ApiError extends Error {
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const identity = getDemoIdentityFromStoredRole();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": String(identity.userId),
-      ...(options.headers ?? {}),
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    cache: "no-store",
-  });
+  async function runRequest() {
+    const accessToken = getStoredAccessToken();
+
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+    });
+  }
+
+  let response = await runRequest();
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshStoredSession().catch(() => null);
+    if (refreshedSession) {
+      response = await runRequest();
+    }
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -49,44 +61,19 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
   const data = rawBody ? (JSON.parse(rawBody) as ErrorShape | T) : null;
 
   if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredSession();
+    }
     const detail =
       typeof (data as ErrorShape | null)?.detail === "string"
         ? (data as ErrorShape).detail!
-        : `Request failed with status ${response.status}.`;
+        : response.status === 401
+          ? "Your session expired. Sign in again."
+          : `Request failed with status ${response.status}.`;
     throw new ApiError(detail, response.status);
   }
 
   return data as T;
-}
-
-async function downloadRequest(path: string): Promise<Blob> {
-  const identity = getDemoIdentityFromStoredRole();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "X-User-Id": String(identity.userId),
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const rawBody = await response.text();
-    let message = `Request failed with status ${response.status}.`;
-
-    if (rawBody) {
-      try {
-        const parsed = JSON.parse(rawBody) as ErrorShape;
-        if (typeof parsed.detail === "string") {
-          message = parsed.detail;
-        }
-      } catch {
-        message = rawBody;
-      }
-    }
-
-    throw new ApiError(message, response.status);
-  }
-
-  return response.blob();
 }
 
 export function getHealth() {
@@ -144,57 +131,47 @@ export function revertVersion(documentId: number, versionId: number) {
   });
 }
 
+export function deleteDocument(documentId: number) {
+  return apiRequest<void>(`/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listUsers() {
+  return apiRequest<AuthUser[]>("/users");
+}
+
 export function listPermissions(documentId: number) {
   return apiRequest<DocumentPermission[]>(`/documents/${documentId}/permissions`);
 }
 
-export function upsertPermission(
-  documentId: number,
-  payload: { user_id: number; role: "owner" | "editor" | "commenter" | "viewer" },
-) {
+export function upsertPermission(documentId: number, payload: { user_id: number; role: "owner" | "editor" | "viewer" }) {
   return apiRequest<DocumentPermission>(`/documents/${documentId}/permissions`, {
     method: "POST",
     body: payload,
   });
 }
 
-export function deletePermission(documentId: number, userId: number) {
+export function removePermission(documentId: number, userId: number) {
   return apiRequest<void>(`/documents/${documentId}/permissions/${userId}`, {
     method: "DELETE",
   });
 }
 
-export function exportDocument(documentId: number, format: "md" | "txt" | "json") {
-  return downloadRequest(`/documents/${documentId}/export?format=${format}`);
+export function listAiHistory(documentId?: number) {
+  const query = documentId ? `?document_id=${documentId}` : "";
+  return apiRequest<AIInteraction[]>(`/ai/history${query}`);
 }
 
-export function listUsers() {
-  return apiRequest<DemoUser[]>("/users");
-}
+type InvokeAiOptions = {
+  signal?: AbortSignal;
+};
 
-export function getCurrentUser() {
-  return apiRequest<DemoUser>("/users/me");
-}
-
-export function listAiHistory(params?: {
-  document_id?: number;
-  feature?: "rewrite" | "summarize" | "translate" | "restructure";
-  limit?: number;
-}) {
-  const search = new URLSearchParams();
-  if (params?.document_id !== undefined) {
-    search.set("document_id", String(params.document_id));
-  }
-  if (params?.feature) {
-    search.set("feature", params.feature);
-  }
-  if (params?.limit !== undefined) {
-    search.set("limit", String(params.limit));
-  }
-
-  const suffix = search.size ? `?${search.toString()}` : "";
-  return apiRequest<AIInteraction[]>(`/ai/history${suffix}`);
-}
+type InvokeAiStreamOptions = InvokeAiOptions & {
+  onChunk: (chunk: string) => void;
+  onOpen?: () => void;
+  onDone?: () => void;
+};
 
 export function invokeAi(payload: {
   feature: "rewrite" | "summarize" | "translate" | "restructure";
@@ -202,9 +179,154 @@ export function invokeAi(payload: {
   surrounding_context: string;
   target_language?: string;
   document_id?: number;
-}) {
+}, options: InvokeAiOptions = {}) {
   return apiRequest<AIInvokeResponse>("/ai/invoke", {
     method: "POST",
     body: payload,
+    signal: options.signal,
   });
+}
+
+async function authenticatedFetch(path: string, options: RequestOptions = {}) {
+  async function runRequest() {
+    const accessToken = getStoredAccessToken();
+
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+    });
+  }
+
+  let response = await runRequest();
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshStoredSession().catch(() => null);
+    if (refreshedSession) {
+      response = await runRequest();
+    }
+  }
+
+  return response;
+}
+
+function parseSseChunk(raw: string) {
+  const lines = raw.split("\n");
+  const dataLines = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  const payload = dataLines.join("\n");
+  if (!payload || payload === "[DONE]") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payload) as { chunk?: string; output_text?: string; text?: string };
+    return parsed.chunk ?? parsed.output_text ?? parsed.text ?? "";
+  } catch {
+    return payload;
+  }
+}
+
+export async function invokeAiStream(
+  payload: {
+    feature: "rewrite" | "summarize" | "translate" | "restructure";
+    selected_text: string;
+    surrounding_context: string;
+    target_language?: string;
+    document_id?: number;
+  },
+  options: InvokeAiStreamOptions,
+) {
+  const response = await authenticatedFetch("/ai/invoke", {
+    method: "POST",
+    body: payload,
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredSession();
+    }
+    const rawBody = await response.text();
+    const data = rawBody ? (JSON.parse(rawBody) as ErrorShape) : null;
+    const detail =
+      typeof data?.detail === "string"
+        ? data.detail
+        : response.status === 401
+          ? "Your session expired. Sign in again."
+          : `Request failed with status ${response.status}.`;
+    throw new ApiError(detail, response.status);
+  }
+
+  options.onOpen?.();
+
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const raw = await response.text();
+    const data = raw ? (JSON.parse(raw) as AIInvokeResponse) : { output_text: "" };
+    options.onChunk(data.output_text ?? "");
+    options.onDone?.();
+    return data.output_text ?? "";
+  }
+
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    options.onDone?.();
+    return "";
+  }
+
+  const decoder = new TextDecoder();
+  let finalOutput = "";
+  let buffered = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const next = decoder.decode(value, { stream: true });
+
+    if (contentType.includes("text/event-stream")) {
+      buffered += next;
+      const events = buffered.split("\n\n");
+      buffered = events.pop() ?? "";
+
+      for (const eventBlock of events) {
+        const chunk = parseSseChunk(eventBlock);
+        if (chunk) {
+          finalOutput += chunk;
+          options.onChunk(chunk);
+        }
+      }
+      continue;
+    }
+
+    finalOutput += next;
+    options.onChunk(next);
+  }
+
+  if (contentType.includes("text/event-stream") && buffered.trim()) {
+    const chunk = parseSseChunk(buffered);
+    if (chunk) {
+      finalOutput += chunk;
+      options.onChunk(chunk);
+    }
+  }
+
+  options.onDone?.();
+  return finalOutput;
 }

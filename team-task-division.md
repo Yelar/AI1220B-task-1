@@ -78,17 +78,25 @@ The codebase already contains the Assignment 1 PoC. Assignment 2 work must exten
 
 ### Todo
 
-- [ ] Replace plain text editing with a rich-text editor that supports headings, bold, italic, lists, and code blocks
-- [ ] Add registration and login screens with protected-route handling
-- [ ] Persist session across refreshes and handle token expiry gracefully
-- [ ] Add auto-save status in the editor
-- [ ] Build version history and restore UI
-- [ ] Build sharing UI for owner/editor/viewer assignment
-- [ ] Build AI suggestion compare/apply/reject/edit UI
-- [ ] Show streamed AI output progressively in the UI
-- [ ] Add cancel-generation support in the UI
-- [ ] Add presence UI for active collaborators
-- [ ] Add frontend component tests for auth flow, document flow, and AI suggestion flow
+- [x] Replace plain text editing with a rich-text editor that supports headings, bold, italic, lists, and code blocks
+- [x] Add registration and login screens with protected-route handling
+- [x] Persist session across refreshes and handle token expiry gracefully
+- [x] Add auto-save status in the editor
+- [x] Build version history and restore UI
+- [x] Build sharing UI for owner/editor/viewer assignment
+- [x] Build AI suggestion compare/apply/reject/edit UI
+- [x] Show streamed AI output progressively in the UI
+- [x] Add cancel-generation support in the UI
+- [x] Add presence UI for active collaborators
+- [x] Add frontend component tests for auth flow, document flow, and AI suggestion flow
+
+### Done
+
+- [x] Auth screens, protected routes, and persisted session flow are implemented in the frontend
+- [x] Rich-text editing, auto-save, version history, and restore UI are implemented in the frontend
+- [x] Sharing, role-aware UI states, and collaborator presence UI are implemented in the frontend
+- [x] AI suggestion review flow, progressive client-side rendering, and cancel support are implemented in the frontend
+- [x] Frontend component tests for auth, document UI, and AI suggestion UI are present and passing
 
 ### Suggested branches
 
