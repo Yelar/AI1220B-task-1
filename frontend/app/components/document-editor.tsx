@@ -8,13 +8,14 @@ import {
   ApiError,
   createVersion,
   getDocument,
-  invokeAiStream,
   listAiHistory,
   listPermissions,
   listUsers,
   listVersions,
   removePermission,
   revertVersion,
+  streamAiSuggestion,
+  updateAiHistoryStatus,
   upsertPermission,
   updateDocument,
 } from "@/app/lib/api";
@@ -27,6 +28,7 @@ import {
   canRestoreVersions,
   canUseAi,
   type AIInteraction,
+  type AIInteractionStatus,
   type AIFeature,
   type AuthUser,
   type DocumentRecord,
@@ -53,6 +55,45 @@ type PresenceParticipant = {
   cursor?: Record<string, unknown> | null;
   selection?: Record<string, unknown> | null;
 };
+
+type SocketMessage =
+  | {
+      type: "connection:ack";
+      documentId: string;
+      clientId: string;
+      participants: PresenceParticipant[];
+    }
+  | {
+      type: "presence:sync";
+      documentId: string;
+      participants: PresenceParticipant[];
+    }
+  | {
+      type: "document:sync";
+      documentId: string;
+      state: {
+        title?: string;
+        content?: string;
+      } | null;
+    }
+  | {
+      type: "document:update";
+      documentId: string;
+      sender: {
+        userId?: string;
+        userName?: string;
+        clientId?: string;
+      };
+      payload: {
+        title?: string;
+        content?: string;
+      };
+    }
+  | {
+      type: "error";
+      documentId: string;
+      message: string;
+    };
 
 function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -203,6 +244,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSourceText, setAiSourceText] = useState("");
   const [aiDraft, setAiDraft] = useState("");
+  const [aiOriginalSuggestion, setAiOriginalSuggestion] = useState("");
+  const [aiInteractionId, setAiInteractionId] = useState<number | null>(null);
   const [aiHistory, setAiHistory] = useState<AIInteraction[]>([]);
   const [aiHistoryLoading, setAiHistoryLoading] = useState(false);
   const [lastAppliedSnapshot, setLastAppliedSnapshot] = useState<string | null>(null);
@@ -211,14 +254,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [participants, setParticipants] = useState<PresenceParticipant[]>([]);
   const [activityByClient, setActivityByClient] = useState<Record<string, { label: string; at: number }>>({});
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
+  const [remoteDraftNotice, setRemoteDraftNotice] = useState<string | null>(null);
 
   const editorRef = useRef<RichTextEditorHandle | null>(null);
   const revealTimerRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const revealRunRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const typingTimerRef = useRef<number | null>(null);
+  const selectedTextRef = useRef("");
   const clientIdRef = useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -234,35 +278,6 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
   }
 
-  function startReveal(text: string) {
-    revealRunRef.current += 1;
-    const runId = revealRunRef.current;
-    clearRevealTimer();
-    setAiDraft("");
-    setAiState("revealing");
-
-    let index = 0;
-    const chunkSize = Math.max(4, Math.ceil(text.length / 36));
-
-    const step = () => {
-      if (runId !== revealRunRef.current) {
-        return;
-      }
-
-      index = Math.min(text.length, index + chunkSize);
-      setAiDraft(text.slice(0, index));
-
-      if (index >= text.length) {
-        setAiState("ready");
-        return;
-      }
-
-      revealTimerRef.current = window.setTimeout(step, 28);
-    };
-
-    step();
-  }
-
   const loadVersionsForDocument = useCallback(async (currentDocumentId: number) => {
     setVersionsLoading(true);
     try {
@@ -275,7 +290,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const loadAiHistoryForDocument = useCallback(async (currentDocumentId: number) => {
     setAiHistoryLoading(true);
     try {
-      setAiHistory(await listAiHistory(currentDocumentId));
+      setAiHistory(await listAiHistory({ document_id: currentDocumentId, limit: 12 }));
     } finally {
       setAiHistoryLoading(false);
     }
@@ -417,6 +432,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setTitle(event.target.value);
     setDirty(true);
     setSaveMessage(null);
+    setRemoteDraftNotice(null);
     setSavingState("idle");
   }
 
@@ -424,6 +440,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setContent(nextValue);
     setDirty(true);
     setSaveMessage(null);
+    setRemoteDraftNotice(null);
     setSavingState("idle");
   }
 
@@ -451,6 +468,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setDirty(false);
     setSaveMessage(`Saved at ${formatTimestamp(savedDocument.updated_at)}.`);
     setSavingState("saved");
+    sendSocketMessage({
+      type: "document:update",
+      payload: {
+        title: savedDocument.title,
+        content: savedDocument.content,
+      },
+    });
     return savedDocument;
   }
 
@@ -481,14 +505,89 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     void handleSaveDocument();
   });
 
-  const sendSocketMessage = useEffectEvent((payload: Record<string, unknown>) => {
+  function sendSocketMessage(payload: Record<string, unknown>) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(payload));
+    }
+  }
+
+  const handleSocketMessage = useEffectEvent((event: MessageEvent<string>) => {
+    try {
+      const payload = JSON.parse(event.data) as SocketMessage;
+
+      if (payload.type === "connection:ack" || payload.type === "presence:sync") {
+        setParticipants(
+          (payload.participants ?? []).filter((entry) => entry.clientId !== clientIdRef.current),
+        );
+        return;
+      }
+
+      if (payload.type === "document:sync") {
+        if (payload.state && !dirty) {
+          setTitle(payload.state.title ?? "");
+          setContent(payload.state.content ?? "");
+          setDocument((current) =>
+            current
+              ? {
+                  ...current,
+                  title: payload.state?.title ?? current.title,
+                  content: payload.state?.content ?? current.content,
+                  updated_at: new Date().toISOString(),
+                }
+              : current,
+          );
+          setRemoteDraftNotice("Synchronized with the latest collaborative document state.");
+        } else if (payload.state && dirty) {
+          setRemoteDraftNotice(
+            "Reconnected and received the latest collaborative state. Save or refresh to reconcile local edits.",
+          );
+        }
+        return;
+      }
+
+      if (
+        payload.type === "document:update" &&
+        payload.sender?.clientId &&
+        payload.sender.clientId !== clientIdRef.current
+      ) {
+        updateActivity(
+          payload.sender.clientId,
+          `${payload.sender.userName ?? "Collaborator"} is editing`,
+        );
+
+        if (!dirty) {
+          setTitle(payload.payload.title ?? "");
+          setContent(payload.payload.content ?? "");
+          setDocument((current) =>
+            current
+              ? {
+                  ...current,
+                  title: payload.payload.title ?? current.title,
+                  content: payload.payload.content ?? current.content,
+                  updated_at: new Date().toISOString(),
+                }
+              : current,
+          );
+        } else {
+          setRemoteDraftNotice(
+            `Live update received from ${payload.sender.userName ?? "a collaborator"}. Save or refresh when ready.`,
+          );
+        }
+        return;
+      }
+
+      if (payload.type === "error") {
+        setConnectionState("offline");
+        setRemoteDraftNotice(payload.message);
+      }
+    } catch {
+      // ignore malformed websocket payloads in the frontend
     }
   });
 
   const currentDocumentId = document?.id ?? null;
   const currentUser = session?.user ?? null;
+  const currentAccessToken = session?.tokens.accessToken ?? null;
 
   useEffect(() => {
     if (!dirty || !currentDocumentId || !canEdit(documentRole)) {
@@ -503,7 +602,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   }, [content, currentDocumentId, dirty, documentRole, title]);
 
   useEffect(() => {
-    if (!currentDocumentId || !currentUser) {
+    if (!currentDocumentId || !currentUser || !currentAccessToken) {
       return;
     }
 
@@ -512,8 +611,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     const connect = () => {
       setConnectionState(socketRef.current ? "reconnecting" : "connecting");
       const params = new URLSearchParams({
-        userId: String(currentUser.id),
-        userName: currentUser.name,
+        token: currentAccessToken,
         clientId: clientIdRef.current,
       });
 
@@ -524,34 +622,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         setConnectionState("live");
         sendSocketMessage({
           type: "presence:update",
-          selection: selectedText
+          selection: selectedTextRef.current
             ? {
-                length: selectedText.length,
+                length: selectedTextRef.current.length,
               }
             : null,
         });
       });
 
-      socket.addEventListener("message", (event) => {
-        try {
-          const payload = JSON.parse(event.data) as {
-            type?: string;
-            participants?: PresenceParticipant[];
-            sender?: { clientId?: string; userName?: string };
-          };
-
-          if (payload.type === "connection:ack" || payload.type === "presence:sync") {
-            setParticipants((payload.participants ?? []).filter((entry) => entry.clientId !== clientIdRef.current));
-            return;
-          }
-
-          if (payload.type === "document:update" && payload.sender?.clientId && payload.sender.clientId !== clientIdRef.current) {
-            updateActivity(payload.sender.clientId, `${payload.sender.userName ?? "Collaborator"} is typing`);
-          }
-        } catch {
-          // ignore malformed websocket payloads in the frontend
-        }
-      });
+      socket.addEventListener("message", handleSocketMessage);
 
       socket.addEventListener("close", () => {
         setParticipants([]);
@@ -577,10 +656,10 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [currentDocumentId, currentUser, selectedText, updateActivity]);
+  }, [currentAccessToken, currentDocumentId, currentUser]);
 
   useEffect(() => {
-    if (!currentDocumentId || !canEdit(documentRole) || !dirty) {
+    if (!currentDocumentId || !canEdit(documentRole) || !dirty || connectionState !== "live") {
       return;
     }
 
@@ -592,10 +671,11 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       sendSocketMessage({
         type: "document:update",
         payload: {
-          updatedAt: new Date().toISOString(),
+          title,
+          content,
         },
       });
-    }, 280);
+    }, 650);
 
     return () => {
       if (typingTimerRef.current !== null) {
@@ -603,7 +683,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         typingTimerRef.current = null;
       }
     };
-  }, [content, currentDocumentId, dirty, documentRole]);
+  }, [connectionState, content, currentDocumentId, dirty, documentRole, title]);
 
   const remoteParticipants = participants.map((participant) => {
     const activity = activityByClient[participant.clientId];
@@ -661,6 +741,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setDirty(false);
       setSavingState("saved");
       setSaveMessage(`Restored ${version.label ?? formatTimestamp(version.created_at)}.`);
+      sendSocketMessage({
+        type: "document:update",
+        payload: {
+          title: savedDocument.title,
+          content: savedDocument.content,
+        },
+      });
       await loadVersionsForDocument(document.id);
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 403) {
@@ -728,6 +815,24 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     }
   }
 
+  async function updateAiStatus(
+    interactionId: number | null,
+    nextStatus: AIInteractionStatus,
+  ) {
+    if (!document || !interactionId) {
+      return;
+    }
+
+    try {
+      await updateAiHistoryStatus(interactionId, { status: nextStatus });
+      await loadAiHistoryForDocument(document.id);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to update AI history.";
+      setAiError(message);
+    }
+  }
+
   async function handleGenerateAi() {
     if (!document || !canUseAi(documentRole)) {
       return;
@@ -747,12 +852,12 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setAiError(null);
     setAiSourceText(source);
     setAiDraft("");
+    setAiOriginalSuggestion("");
+    setAiInteractionId(null);
     setAiState("loading");
 
     try {
-      let fallbackText = "";
-
-      const streamedText = await invokeAiStream(
+      await streamAiSuggestion(
         {
           feature: aiFeature,
           selected_text: source,
@@ -761,24 +866,30 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
           document_id: document.id,
         },
         {
-          signal: controller.signal,
-          onOpen: () => {
+          onStart: (event) => {
+            setAiInteractionId(event.interaction_id);
+            setAiState("loading");
+          },
+          onChunk: (event) => {
+            setAiInteractionId(event.interaction_id);
+            setAiDraft(event.text);
             setAiState("revealing");
           },
-          onChunk: (chunk) => {
-            fallbackText += chunk;
-            setAiDraft((current) => `${current}${chunk}`);
-            setAiState("revealing");
-          },
-          onDone: () => {
+          onDone: (event) => {
+            setAiInteractionId(event.interaction_id);
+            setAiOriginalSuggestion(event.output_text);
+            setAiDraft(event.output_text);
             setAiState("ready");
           },
+          onError: (event) => {
+            setAiInteractionId(event.interaction_id);
+            setAiError(event.message);
+            setAiState("error");
+          },
         },
+        controller.signal,
       );
 
-      if (!fallbackText && streamedText) {
-        startReveal(streamedText);
-      }
       await loadAiHistoryForDocument(document.id);
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 403) {
@@ -786,6 +897,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       }
       if (requestError instanceof DOMException && requestError.name === "AbortError") {
         setAiState("cancelled");
+        await loadAiHistoryForDocument(document.id);
         return;
       }
 
@@ -801,30 +913,34 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   function handleCancelAi() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
-    revealRunRef.current += 1;
     clearRevealTimer();
     setAiState("cancelled");
   }
 
-  function handleRejectAi() {
-    revealRunRef.current += 1;
+  async function handleRejectAi() {
     clearRevealTimer();
     setAiDraft("");
     setAiSourceText("");
     setAiState("idle");
     setAiError(null);
+    await updateAiStatus(aiInteractionId, "rejected");
   }
 
-  function handleApplyAi() {
+  async function handleApplyAi() {
     if (!aiDraft.trim()) {
       return;
     }
+
+    const normalizedDraft = aiDraft.trim();
+    const appliedStatus =
+      normalizedDraft === aiOriginalSuggestion.trim() ? "accepted" : "edited_applied";
 
     setLastAppliedSnapshot(content);
     editorRef.current?.replaceSelection(aiDraft);
     setDirty(true);
     setSaveMessage(null);
     setAiState("ready");
+    await updateAiStatus(aiInteractionId, appliedStatus);
   }
 
   function handleUndoAiApply() {
@@ -954,6 +1070,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         <section className="min-w-0">
           <div className="space-y-4">
             {!canEdit(documentRole) ? <div className="notice notice-warn">Viewer mode is read-only.</div> : null}
+            {remoteDraftNotice ? <div className="notice notice-info">{remoteDraftNotice}</div> : null}
             {saveMessage ? <div className="notice notice-success">{saveMessage}</div> : null}
             {error ? <div className="notice notice-error">{error}</div> : null}
           </div>
@@ -1013,6 +1130,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                 onSelectionChange={({ plainText, selectedText: nextSelectedText }) => {
                   setPlainTextSnapshot(plainText);
                   setSelectedText(nextSelectedText);
+                  selectedTextRef.current = nextSelectedText;
                   if (socketRef.current?.readyState === WebSocket.OPEN) {
                     socketRef.current.send(
                       JSON.stringify({

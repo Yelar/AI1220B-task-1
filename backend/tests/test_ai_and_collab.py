@@ -1,3 +1,5 @@
+import json
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -6,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
 from app.database import Base, get_db
@@ -59,6 +62,10 @@ def register_user(client: TestClient, email: str, name: str, password: str = "Pa
 
 
 def login_headers(client: TestClient, email: str, password: str = "Password123!"):
+    return {"Authorization": f"Bearer {login_token(client, email, password)}"}
+
+
+def login_token(client: TestClient, email: str, password: str = "Password123!"):
     response = client.post(
         "/api/users/login",
         json={
@@ -67,8 +74,7 @@ def login_headers(client: TestClient, email: str, password: str = "Password123!"
         },
     )
     assert response.status_code == 200, response.text
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return response.json()["access_token"]
 
 
 def create_document(client: TestClient, headers: dict, title: str = "Doc", content: str = "Hello"):
@@ -93,6 +99,35 @@ def set_llm_mock(value: bool):
 
 def restore_llm_mock(old: bool):
     settings.llm_mock = old
+
+
+def parse_sse_events(lines: list[str]) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    current_event = "message"
+    current_data: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_event, current_data
+        if current_data:
+            events.append((current_event, json.loads("\n".join(current_data))))
+        current_event = "message"
+        current_data = []
+
+    for raw_line in lines:
+        line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
+        if not line.strip():
+            flush()
+            continue
+
+        if line.startswith("event:"):
+            current_event = line.split(":", 1)[1].strip()
+            continue
+
+        if line.startswith("data:"):
+            current_data.append(line.split(":", 1)[1].lstrip())
+
+    flush()
+    return events
 
 
 def test_ai_invoke_returns_mock_metadata(client: TestClient):
@@ -240,6 +275,197 @@ def test_document_history_can_include_other_users_with_access(client: TestClient
     assert items[0]["document_id"] == document["id"]
 
 
+def test_ai_streaming_emits_sse_events_and_updates_history(client: TestClient, monkeypatch):
+    register_user(client, "owner@example.com", "Owner Demo")
+    headers = login_headers(client, "owner@example.com")
+    document = create_document(client, headers)
+
+    class FakeStreamingProvider:
+        async def stream(self, _payload):
+            yield "Here is the rewritten text: "
+            yield "Cleaner final answer."
+
+    old_mock = set_llm_mock(False)
+    monkeypatch.setattr("app.routers.ai.get_ai_provider", lambda: FakeStreamingProvider())
+
+    try:
+        with client.stream(
+            "POST",
+            "/api/ai/stream",
+            headers=headers,
+            json={
+                "feature": "rewrite",
+                "selected_text": "Rewrite this paragraph.",
+                "surrounding_context": "Some surrounding context.",
+                "document_id": document["id"],
+            },
+        ) as response:
+            assert response.status_code == 200, response.text
+            events = parse_sse_events(list(response.iter_lines()))
+    finally:
+        restore_llm_mock(old_mock)
+
+    event_names = [event_name for event_name, _ in events]
+    assert event_names[0] == "start"
+    assert "chunk" in event_names
+    assert event_names[-1] == "done"
+
+    done_payload = next(payload for event_name, payload in events if event_name == "done")
+    assert done_payload["output_text"] == "Cleaner final answer."
+    assert done_payload["feature"] == "rewrite"
+
+    interaction_id = done_payload["interaction_id"]
+    history_response = client.get(
+        f"/api/ai/history?document_id={document['id']}",
+        headers=headers,
+    )
+    assert history_response.status_code == 200, history_response.text
+
+    history_items = history_response.json()
+    for _ in range(20):
+        if history_items and history_items[0]["status"] != "streaming":
+            break
+        time.sleep(0.1)
+        history_response = client.get(
+            f"/api/ai/history?document_id={document['id']}",
+            headers=headers,
+        )
+        assert history_response.status_code == 200, history_response.text
+        history_items = history_response.json()
+
+    assert len(history_items) == 1
+    assert history_items[0]["status"] in {"streaming", "completed"}
+    assert history_items[0]["response_text"] == "Cleaner final answer."
+
+    accepted = client.patch(
+        f"/api/ai/history/{interaction_id}",
+        headers=headers,
+        json={"status": "accepted"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "accepted"
+
+    rejected = client.patch(
+        f"/api/ai/history/{interaction_id}",
+        headers=headers,
+        json={"status": "rejected"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
+
+
+def test_websocket_auth_presence_and_reconnect_sync(client: TestClient):
+    register_user(client, "owner@example.com", "Owner Demo")
+    register_user(client, "editor@example.com", "Editor Demo")
+
+    owner_headers = login_headers(client, "owner@example.com")
+    editor_headers = login_headers(client, "editor@example.com")
+    owner_token = owner_headers["Authorization"].removeprefix("Bearer ")
+    editor_token = editor_headers["Authorization"].removeprefix("Bearer ")
+
+    document = create_document(
+        client,
+        owner_headers,
+        title="Realtime Doc",
+        content="Initial collaborative content",
+    )
+
+    with client.websocket_connect(
+        f"/ws/documents/{document['id']}?token={owner_token}&clientId=owner-client"
+    ) as ws_owner:
+        ack_owner = ws_owner.receive_json()
+        assert ack_owner["type"] == "connection:ack"
+        assert ack_owner["clientId"] == "owner-client"
+
+        sync_owner = ws_owner.receive_json()
+        assert sync_owner["type"] == "document:sync"
+        assert sync_owner["state"] is None
+
+        initial_presence_owner = ws_owner.receive_json()
+        assert initial_presence_owner["type"] == "presence:sync"
+        assert len(initial_presence_owner["participants"]) == 1
+
+        with client.websocket_connect(
+            f"/ws/documents/{document['id']}?token={editor_token}&clientId=editor-client"
+        ) as ws_editor:
+            ack_editor = ws_editor.receive_json()
+            assert ack_editor["type"] == "connection:ack"
+            assert ack_editor["clientId"] == "editor-client"
+
+            sync_editor = ws_editor.receive_json()
+            assert sync_editor["type"] == "document:sync"
+            assert sync_editor["state"] is None
+
+            presence_join_editor = ws_editor.receive_json()
+            assert presence_join_editor["type"] == "presence:sync"
+            assert len(presence_join_editor["participants"]) == 2
+
+            presence_join_owner = ws_owner.receive_json()
+            assert presence_join_owner["type"] == "presence:sync"
+            assert len(presence_join_owner["participants"]) == 2
+
+            ws_editor.send_json(
+                {
+                    "type": "presence:update",
+                    "cursor": {"from": 5, "to": 5},
+                    "selection": {"from": 0, "to": 5},
+                }
+            )
+
+            presence_for_owner = ws_owner.receive_json()
+            assert presence_for_owner["type"] == "presence:sync"
+            assert len(presence_for_owner["participants"]) == 2
+
+            presence_for_editor = ws_editor.receive_json()
+            assert presence_for_editor["type"] == "presence:sync"
+            assert len(presence_for_editor["participants"]) == 2
+
+            ws_owner.send_json(
+                {
+                    "type": "document:update",
+                    "payload": {
+                        "title": "Realtime Doc v2",
+                        "content": "Updated collaborative content",
+                    },
+                }
+            )
+
+            update_for_editor = ws_editor.receive_json()
+            assert update_for_editor["type"] == "document:update"
+            assert update_for_editor["documentId"] == str(document["id"])
+            assert update_for_editor["payload"]["content"] == "Updated collaborative content"
+            assert update_for_editor["sender"]["clientId"] == "owner-client"
+
+        presence_after_leave = ws_owner.receive_json()
+        assert presence_after_leave["type"] == "presence:sync"
+        assert len(presence_after_leave["participants"]) == 1
+
+        with client.websocket_connect(
+            f"/ws/documents/{document['id']}?token={editor_token}&clientId=editor-client"
+        ) as ws_editor_reconnected:
+            ack_reconnected = ws_editor_reconnected.receive_json()
+            assert ack_reconnected["type"] == "connection:ack"
+
+            sync_reconnected = ws_editor_reconnected.receive_json()
+            assert sync_reconnected["type"] == "document:sync"
+            assert sync_reconnected["state"]["title"] == "Realtime Doc v2"
+            assert sync_reconnected["state"]["content"] == "Updated collaborative content"
+
+            presence_reconnected_editor = ws_editor_reconnected.receive_json()
+            assert presence_reconnected_editor["type"] == "presence:sync"
+            assert len(presence_reconnected_editor["participants"]) == 2
+
+            presence_reconnected_owner = ws_owner.receive_json()
+            assert presence_reconnected_owner["type"] == "presence:sync"
+            assert len(presence_reconnected_owner["participants"]) == 2
+
+
+def test_websocket_rejects_invalid_token(client: TestClient):
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/documents/999?token=not-a-real-token"):
+            pass
+
+
 def test_lm_studio_url_normalizes_supported_base_urls():
     original = settings.lm_studio_base_url
     try:
@@ -264,57 +490,3 @@ def test_sanitize_model_output_strips_common_wrappers():
 
     summary = "Summary:\n\nThis is the concise summary."
     assert sanitize_model_output(summary) == "This is the concise summary."
-
-
-def test_websocket_presence_and_document_updates(client: TestClient):
-    with client.websocket_connect(
-        "/ws/documents/123?userId=u1&userName=Alice&clientId=client-a"
-    ) as ws_a:
-        ack_a = ws_a.receive_json()
-        assert ack_a["type"] == "connection:ack"
-        assert ack_a["clientId"] == "client-a"
-
-        sync_a = ws_a.receive_json()
-        assert sync_a["type"] == "presence:sync"
-
-        with client.websocket_connect(
-            "/ws/documents/123?userId=u2&userName=Bob&clientId=client-b"
-        ) as ws_b:
-            ack_b = ws_b.receive_json()
-            assert ack_b["type"] == "connection:ack"
-            assert ack_b["clientId"] == "client-b"
-
-            sync_b = ws_b.receive_json()
-            assert sync_b["type"] == "presence:sync"
-
-            sync_a_after_join = ws_a.receive_json()
-            assert sync_a_after_join["type"] == "presence:sync"
-            assert len(sync_a_after_join["participants"]) == 2
-
-            ws_a.send_json(
-                {
-                    "type": "presence:update",
-                    "cursor": {"line": 1, "column": 5},
-                    "selection": {"start": 0, "end": 4},
-                }
-            )
-
-            presence_for_a = ws_a.receive_json()
-            assert presence_for_a["type"] == "presence:sync"
-
-            presence_for_b = ws_b.receive_json()
-            assert presence_for_b["type"] == "presence:sync"
-            assert len(presence_for_b["participants"]) == 2
-
-            ws_a.send_json(
-                {
-                    "type": "document:update",
-                    "payload": {"content": "Updated content"},
-                }
-            )
-
-            update_for_b = ws_b.receive_json()
-            assert update_for_b["type"] == "document:update"
-            assert update_for_b["documentId"] == "123"
-            assert update_for_b["payload"]["content"] == "Updated content"
-            assert update_for_b["sender"]["userId"] == "u1"

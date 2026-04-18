@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from fastapi import Header
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import decode_access_token
 from app.database import get_db
+from app.identity import resolve_http_user
 from app.models import Document, DocumentPermission, DocumentVersion, User
 from app.schemas import (
     DocumentCreate,
@@ -24,31 +24,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    legacy_user_id: str | None = Header(default=None, alias="X-User-Id"),
     db: Session = Depends(get_db),
 ) -> User:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token.",
-        )
-
-    token = credentials.credentials
-    try:
-        payload = decode_access_token(token)
-        user_id = int(payload["sub"])
-    except (ValueError, KeyError, TypeError, JWTError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token.",
-        )
-
-    user = db.get(User, user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authenticated user no longer exists.",
-        )
-    return user
+    return resolve_http_user(credentials, legacy_user_id, db)
 
 
 def get_document_role(document: Document, user: User, db: Session) -> str | None:

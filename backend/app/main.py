@@ -2,11 +2,14 @@ from contextlib import asynccontextmanager
 
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import ensure_local_schema, seed_demo_users
+from app.database import get_db
+from app.identity import resolve_websocket_identity
 from app.realtime import manager
 from app.routers import ai, documents, users
 from app.schemas import HealthResponse
@@ -51,30 +54,45 @@ def health():
 
 
 @app.websocket("/ws/documents/{document_id}")
-async def document_socket(websocket: WebSocket, document_id: str):
-    user_id = websocket.query_params.get("userId", "anonymous")
-    user_name = websocket.query_params.get("userName", "Anonymous")
-    client_id = websocket.query_params.get("clientId", str(uuid4()))
+async def document_socket(
+    websocket: WebSocket,
+    document_id: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        identity = resolve_websocket_identity(websocket, db)
+    except HTTPException:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
     presence = await manager.connect(
         document_id,
         websocket,
-        user_id=user_id,
-        user_name=user_name,
-        client_id=client_id,
+        user_id=str(identity.user.id),
+        user_name=identity.user_name,
+        client_id=identity.client_id,
     )
+    state = manager.get_document_state(document_id)
     await manager.send_to_client(
         websocket,
         {
             "type": "connection:ack",
             "documentId": document_id,
-            "clientId": client_id,
+            "clientId": identity.client_id,
             "presence": {
                 "userId": presence.user_id,
                 "userName": presence.user_name,
                 "clientId": presence.client_id,
             },
             "participants": manager.get_room_presence(document_id),
+        },
+    )
+    await manager.send_to_client(
+        websocket,
+        {
+            "type": "document:sync",
+            "documentId": document_id,
+            "state": state,
         },
     )
     await manager.broadcast(
@@ -94,7 +112,7 @@ async def document_socket(websocket: WebSocket, document_id: str):
             if message_type == "presence:update":
                 manager.update_presence(
                     document_id,
-                    client_id,
+                    identity.client_id,
                     cursor=payload.get("cursor"),
                     selection=payload.get("selection"),
                 )
@@ -109,19 +127,20 @@ async def document_socket(websocket: WebSocket, document_id: str):
                 continue
 
             if message_type == "document:update":
+                manager.set_document_state(document_id, payload.get("payload", {}))
                 await manager.broadcast(
                     document_id,
                     {
                         "type": "document:update",
                         "documentId": document_id,
                         "sender": {
-                            "userId": user_id,
-                            "userName": user_name,
-                            "clientId": client_id,
+                            "userId": str(identity.user.id),
+                            "userName": identity.user_name,
+                            "clientId": identity.client_id,
                         },
                         "payload": payload.get("payload", {}),
                     },
-                    exclude_client_id=client_id,
+                    exclude_client_id=identity.client_id,
                 )
                 continue
 
@@ -134,7 +153,7 @@ async def document_socket(websocket: WebSocket, document_id: str):
                 },
             )
     except WebSocketDisconnect:
-        manager.disconnect(document_id, client_id)
+        manager.disconnect(document_id, identity.client_id)
         await manager.broadcast(
             document_id,
             {

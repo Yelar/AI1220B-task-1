@@ -26,6 +26,17 @@ function CloseIcon() {
   );
 }
 
+function historyStatusLabel(status: AIInteraction["status"]) {
+  switch (status) {
+    case "edited_applied":
+      return "Edited and applied";
+    case "partially_applied":
+      return "Partially applied";
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
 type Props = {
   open: boolean;
   canUseAi: boolean;
@@ -207,7 +218,12 @@ export default function AiAssistantPanel({
               className="rounded-2xl border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-4 py-3"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-slate-800">{entry.feature}</div>
+                <div>
+                  <div className="text-sm font-medium text-slate-800">{entry.feature}</div>
+                  <div className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">
+                    {historyStatusLabel(entry.status)}
+                  </div>
+                </div>
                 <div className="text-xs text-slate-500">{formatTimestamp(entry.created_at)}</div>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-600">
