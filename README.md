@@ -29,17 +29,25 @@ This project builds the Assignment 1 design into a working local-first system wi
 - Authenticated WebSocket document sessions
 - Live document update propagation
 - Presence and activity awareness
+- Remote cursor and selection rendering
 - Reconnect and session resynchronization
-- Baseline last-write-wins synchronization
+- Safe merge handling for common non-overlapping concurrent edits
 
 ### AI assistant
 
 - Streamed AI responses
 - Supported features: `rewrite`, `summarize`, `translate`, `restructure`
 - Cancel in-progress generation
-- Suggestion review workflow: compare, edit, apply, reject, undo
+- Suggestion review workflow: compare, edit, apply, partially apply, reject, undo
 - Configurable prompt-building module
 - AI interaction history per document
+
+### Completed bonus features
+
+- Remote cursor and selection tracking
+- Share-by-link invitations with role selection and revocation
+- Partial acceptance of AI suggestions
+- Playwright E2E coverage for login through AI suggestion acceptance
 
 ### Testing and documentation
 
@@ -55,10 +63,8 @@ AI1220B-task-1/
 ├── README.md
 ├── DEVIATIONS.md
 ├── run.sh
-├── report.pdf
-├── report.md
-├── meeting_log.md
 ├── team-task-division.md
+├── assignment-1-archive/
 ├── diagrams/
 ├── backend/
 └── frontend/
@@ -168,6 +174,10 @@ The live demo can be run in this order:
 - `GET /api/documents/{id}/permissions`
 - `POST /api/documents/{id}/permissions`
 - `DELETE /api/documents/{id}/permissions/{user_id}`
+- `GET /api/documents/{id}/share-links`
+- `POST /api/documents/{id}/share-links`
+- `DELETE /api/documents/{id}/share-links/{link_id}`
+- `POST /api/documents/share-links/redeem`
 
 ### AI
 
@@ -195,19 +205,23 @@ pytest
 ```bash
 cd frontend
 npm install
+npx playwright install chromium
 npm test
+npm run lint
+npx next build --webpack
+npm run test:e2e
 ```
 
 ## Deliverables Included
 
 - Source code in `frontend/` and `backend/`
-- Final report in `report.pdf`
 - Editable architecture and data-model diagrams in `diagrams/`
 - Assignment 1 to Assignment 2 deviation report in `DEVIATIONS.md`
-- Team process notes in `meeting_log.md` and `team-task-division.md`
+- Team task breakdown in `team-task-division.md`
+- Archived Assignment 1 artifacts in `assignment-1-archive/`
 
 ## Notes for Evaluators
 
-- The baseline collaboration model is intentionally simple and uses last-write-wins rather than CRDT/OT conflict resolution.
+- The collaboration layer uses authenticated WebSocket sessions with presence, reconnect sync, remote selections, and merge handling for common non-overlapping concurrent edits. It does not claim CRDT/OT conflict resolution.
 - AI suggestions are non-destructive until the user explicitly applies them.
 - The implementation remains aligned with the Assignment 1 architecture, and all intentional changes are documented in `DEVIATIONS.md`.

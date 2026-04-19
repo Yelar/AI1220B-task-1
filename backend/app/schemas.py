@@ -98,6 +98,25 @@ class DocumentPermissionRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentShareLinkCreate(BaseModel):
+    role: RoleValue
+
+
+class DocumentShareLinkRead(BaseModel):
+    id: int
+    document_id: int
+    role: RoleValue
+    token: str
+    revoked_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentShareLinkRedeemRequest(BaseModel):
+    token: str = Field(min_length=1)
+
+
 class AIInvokeRequest(BaseModel):
     feature: Literal["rewrite", "summarize", "translate", "restructure"]
     selected_text: str = Field(min_length=1)

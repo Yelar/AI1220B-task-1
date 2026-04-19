@@ -10,6 +10,7 @@ This backend provides authentication, document management, versioning, sharing, 
 - Document CRUD and export
 - Version creation and restore
 - Server-side role enforcement for `owner`, `editor`, and `viewer`
+- Direct sharing and share-by-link invitation support
 - AI invocation, streaming, and history logging
 - Authenticated WebSocket collaboration
 
@@ -93,6 +94,13 @@ LLM_MOCK=true
 - `POST /api/documents/{id}/permissions`
 - `DELETE /api/documents/{id}/permissions/{user_id}`
 
+### Share links
+
+- `GET /api/documents/{id}/share-links`
+- `POST /api/documents/{id}/share-links`
+- `DELETE /api/documents/{id}/share-links/{link_id}`
+- `POST /api/documents/share-links/redeem`
+
 ### AI
 
 - `POST /api/ai/invoke`
@@ -126,7 +134,7 @@ Server message types:
 - `document:update`
 - `error`
 
-The current consistency model is baseline last-write-wins with reconnect resynchronization.
+The current consistency model uses reconnect resynchronization plus frontend merge handling for common non-overlapping concurrent edits. It is stronger than plain snapshot last-write-wins, but it does not claim CRDT/OT conflict resolution.
 
 ## Tests
 
@@ -136,6 +144,21 @@ Run the backend suite with:
 cd backend
 source .venv/bin/activate
 pytest
+```
+
+Useful full verification commands:
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+cd ../frontend
+npm install
+npx playwright install chromium
+npm test
+npm run lint
+npx next build --webpack
+npm run test:e2e
 ```
 
 Coverage includes:

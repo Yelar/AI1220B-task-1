@@ -11,9 +11,10 @@ This Next.js frontend delivers the Assignment 2 user experience for authenticati
 - Auto-save status feedback
 - Version history and restore UI
 - Sharing UI for `owner`, `editor`, and `viewer`
-- AI assistant with streamed output, cancel, review, edit, apply, reject, and undo
+- Share-by-link invitation and redemption UI
+- AI assistant with streamed output, cancel, review, edit, apply, partially apply, reject, and undo
 - AI history panel per document
-- Collaboration presence and connection-state UI
+- Collaboration presence, connection-state, and remote selection UI
 
 ## Local Setup
 
@@ -61,6 +62,8 @@ NEXT_PUBLIC_AUTH_MODE=local
 - Owners can share documents by email lookup
 - Owners can assign `editor` or `viewer`
 - Owners can revoke access
+- Owners can create and revoke invite links
+- Invite links can be redeemed into document access
 - The frontend respects server-side permission outcomes
 
 ### AI assistant
@@ -69,6 +72,7 @@ NEXT_PUBLIC_AUTH_MODE=local
 - Users can cancel generation in progress
 - Suggestions are reviewed before application
 - Suggestions can be edited before applying
+- Users can partially apply a suggestion
 - Users can reject a suggestion or undo the last apply
 - Per-document AI history is displayed in the side panel
 
@@ -77,7 +81,9 @@ NEXT_PUBLIC_AUTH_MODE=local
 - Document sessions connect through authenticated WebSockets
 - Live updates propagate to other connected clients
 - Presence and collaborator activity are shown in the side panel
+- Remote cursor and selection markers are rendered in the editor
 - The editor handles reconnect and document resync
+- The collaboration flow attempts safe merge handling for common non-overlapping concurrent edits
 
 ## Tests
 
@@ -91,15 +97,27 @@ npm install
 npm test
 ```
 
+Additional verification:
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run lint
+npx next build --webpack
+npm run test:e2e
+```
+
 Current test coverage includes:
 
 - auth screen flow
 - dashboard loading/filtering
 - AI assistant panel rendering
 - config normalization
+- collaboration merge helper behavior
+- Playwright login-to-AI-acceptance flow
 
 ## Notes
 
 - The frontend is aligned with the final Assignment 2 backend, not the earlier Assignment 1 PoC.
 - Permissions are enforced on the server; the frontend reflects those results in the UI.
-- The current collaboration UX shows participant presence and activity, while the sync strategy remains the baseline last-write-wins approach.
+- The collaboration UX includes presence, remote selections, reconnect sync, and merge handling for common non-overlapping concurrent edits without claiming CRDT/OT support.

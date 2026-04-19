@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type { AIInteraction, AIFeature } from "@/app/lib/types";
 import { formatTimestamp } from "@/app/lib/ui";
 
@@ -56,6 +58,7 @@ type Props = {
   onGenerate: () => void;
   onCancel: () => void;
   onApply: () => void;
+  onApplySelected: (snippet: string) => void;
   onReject: () => void;
   onUndo: () => void;
   onClose: () => void;
@@ -80,10 +83,13 @@ export default function AiAssistantPanel({
   onGenerate,
   onCancel,
   onApply,
+  onApplySelected,
   onReject,
   onUndo,
   onClose,
 }: Props) {
+  const [selectedSuggestionText, setSelectedSuggestionText] = useState("");
+
   if (!open) {
     return null;
   }
@@ -170,6 +176,12 @@ export default function AiAssistantPanel({
           <textarea
             value={aiDraft}
             onChange={(event) => onDraftChange(event.target.value)}
+            onSelect={(event) => {
+              const { selectionStart, selectionEnd, value } = event.currentTarget;
+              setSelectedSuggestionText(
+                selectionStart !== selectionEnd ? value.slice(selectionStart, selectionEnd) : "",
+              );
+            }}
             placeholder="AI suggestions will appear here."
             rows={8}
             className="field-area min-h-[12rem]"
@@ -185,6 +197,14 @@ export default function AiAssistantPanel({
           className="button-primary h-10 rounded-full px-4"
         >
           Apply
+        </button>
+        <button
+          type="button"
+          onClick={() => onApplySelected(selectedSuggestionText)}
+          disabled={!selectedSuggestionText.trim()}
+          className="button-secondary h-10 rounded-full px-4"
+        >
+          Apply selected part
         </button>
         <button
           type="button"

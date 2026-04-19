@@ -1,24 +1,30 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from "react";
 import { useCallback } from "react";
 
 import {
   ApiError,
+  createShareLink,
   createVersion,
   getDocument,
   listAiHistory,
   listPermissions,
+  listShareLinks,
   listUsers,
   listVersions,
+  redeemShareLink,
   removePermission,
   revertVersion,
+  revokeShareLink,
   streamAiSuggestion,
   updateAiHistoryStatus,
   upsertPermission,
   updateDocument,
 } from "@/app/lib/api";
+import { mergeConcurrentTextChanges } from "@/app/lib/collaboration";
 import { WS_BASE_URL } from "@/app/lib/config";
 import { formatTimestamp, stripHtml } from "@/app/lib/ui";
 import {
@@ -33,6 +39,7 @@ import {
   type AuthUser,
   type DocumentRecord,
   type DocumentShare,
+  type DocumentShareLink,
   type DocumentVersion,
   type UserRole,
 } from "@/app/lib/types";
@@ -52,8 +59,15 @@ type PresenceParticipant = {
   userId: string;
   userName: string;
   clientId: string;
-  cursor?: Record<string, unknown> | null;
-  selection?: Record<string, unknown> | null;
+  cursor?: {
+    position: number | null;
+  } | null;
+  selection?: {
+    start: number | null;
+    end: number | null;
+    length: number;
+    text?: string;
+  } | null;
 };
 
 type SocketMessage =
@@ -214,6 +228,7 @@ function createVersionLabel() {
 }
 
 export default function DocumentEditor({ documentId }: { documentId: number }) {
+  const searchParams = useSearchParams();
   const { session, logout, status } = useAuth();
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [title, setTitle] = useState("");
@@ -232,6 +247,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const [shareRole, setShareRole] = useState<Exclude<UserRole, "owner">>("viewer");
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [shareLinks, setShareLinks] = useState<DocumentShareLink[]>([]);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionLabel, setVersionLabel] = useState("");
@@ -263,6 +279,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   const reconnectTimerRef = useRef<number | null>(null);
   const typingTimerRef = useRef<number | null>(null);
   const selectedTextRef = useRef("");
+  const syncedTitleRef = useRef("");
+  const syncedContentRef = useRef("");
   const clientIdRef = useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -270,6 +288,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
   );
 
   const currentUserEmail = session?.user.email ?? "";
+  const inviteToken = searchParams.get("invite");
 
   function clearRevealTimer() {
     if (revealTimerRef.current !== null) {
@@ -327,10 +346,14 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
     if (role !== "owner") {
       setShares([]);
+      setShareLinks([]);
       return;
     }
 
-    const permissions = await listPermissions(currentDocumentId);
+    const [permissions, links] = await Promise.all([
+      listPermissions(currentDocumentId),
+      listShareLinks(currentDocumentId),
+    ]);
     const mappedShares: DocumentShare[] = permissions
       .filter((permission) => permission.role !== "owner")
       .map((permission) => {
@@ -344,7 +367,25 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       });
 
     setShares(mappedShares);
+    setShareLinks(links);
   }, []);
+
+  const collaboratorPalette = [
+    "#315e8a",
+    "#0f766e",
+    "#b45309",
+    "#be123c",
+    "#6d28d9",
+    "#15803d",
+  ];
+
+  function colorForClient(clientId: string) {
+    let hash = 0;
+    for (let index = 0; index < clientId.length; index += 1) {
+      hash = (hash * 31 + clientId.charCodeAt(index)) >>> 0;
+    }
+    return collaboratorPalette[hash % collaboratorPalette.length];
+  }
 
   const updateActivity = useCallback((clientId: string, label: string) => {
     setActivityByClient((current) => ({
@@ -355,6 +396,59 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       },
     }));
   }, []);
+
+  const applyRemoteSnapshot = useCallback((nextTitle: string, nextContent: string) => {
+    syncedTitleRef.current = nextTitle;
+    syncedContentRef.current = nextContent;
+
+    setTitle(nextTitle);
+    setContent(nextContent);
+    setDocument((current) =>
+      current
+        ? {
+            ...current,
+            title: nextTitle,
+            content: nextContent,
+            updated_at: new Date().toISOString(),
+          }
+        : current,
+    );
+  }, []);
+
+  const mergeRemoteDraft = useCallback(
+    (nextTitle: string, nextContent: string, sourceLabel: string) => {
+      const titleMerge = mergeConcurrentTextChanges(syncedTitleRef.current, title, nextTitle);
+      const contentMerge = mergeConcurrentTextChanges(syncedContentRef.current, content, nextContent);
+
+      syncedTitleRef.current = nextTitle;
+      syncedContentRef.current = nextContent;
+
+      setTitle(titleMerge.merged);
+      setContent(contentMerge.merged);
+      setDocument((current) =>
+        current
+          ? {
+              ...current,
+              title: titleMerge.merged,
+              content: contentMerge.merged,
+              updated_at: new Date().toISOString(),
+            }
+          : current,
+      );
+      setDirty(true);
+      setSavingState("idle");
+
+      const hadConflict =
+        titleMerge.strategy === "conflict" || contentMerge.strategy === "conflict";
+
+      setRemoteDraftNotice(
+        hadConflict
+          ? `${sourceLabel} updated the document while you were editing. Your draft was preserved and needs a quick manual review before saving.`
+          : `Merged a live update from ${sourceLabel.toLowerCase()} into your draft. Review and save when ready.`,
+      );
+    },
+    [content, title],
+  );
 
   useEffect(() => {
     if (!Number.isFinite(documentId) || documentId <= 0) {
@@ -376,6 +470,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setError(null);
 
       try {
+        if (inviteToken) {
+          await redeemShareLink(inviteToken);
+          if (typeof window !== "undefined") {
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.delete("invite");
+            window.history.replaceState({}, "", nextUrl.toString());
+          }
+        }
+
         const currentDocument = await getDocument(documentId);
         const nextRole = await detectDocumentRole(currentDocument.id);
 
@@ -385,6 +488,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
         setDocument(currentDocument);
         setDocumentRole(nextRole);
+        syncedTitleRef.current = currentDocument.title;
+        syncedContentRef.current = currentDocument.content;
         setTitle(currentDocument.title);
         setContent(currentDocument.content);
         setPlainTextSnapshot(stripHtml(currentDocument.content));
@@ -422,7 +527,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         window.clearTimeout(typingTimerRef.current);
       }
     };
-  }, [currentUserEmail, detectDocumentRole, documentId, loadAiHistoryForDocument, loadUsersAndShares, loadVersionsForDocument, status]);
+  }, [currentUserEmail, detectDocumentRole, documentId, inviteToken, loadAiHistoryForDocument, loadUsersAndShares, loadVersionsForDocument, status]);
 
   useEffect(() => {
     setPlainTextSnapshot(stripHtml(content));
@@ -465,6 +570,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setDocument(savedDocument);
     setTitle(savedDocument.title);
     setContent(savedDocument.content);
+    syncedTitleRef.current = savedDocument.title;
+    syncedContentRef.current = savedDocument.content;
     setDirty(false);
     setSaveMessage(`Saved at ${formatTimestamp(savedDocument.updated_at)}.`);
     setSavingState("saved");
@@ -524,22 +631,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
 
       if (payload.type === "document:sync") {
         if (payload.state && !dirty) {
-          setTitle(payload.state.title ?? "");
-          setContent(payload.state.content ?? "");
-          setDocument((current) =>
-            current
-              ? {
-                  ...current,
-                  title: payload.state?.title ?? current.title,
-                  content: payload.state?.content ?? current.content,
-                  updated_at: new Date().toISOString(),
-                }
-              : current,
-          );
+          applyRemoteSnapshot(payload.state.title ?? "", payload.state.content ?? "");
           setRemoteDraftNotice("Synchronized with the latest collaborative document state.");
         } else if (payload.state && dirty) {
-          setRemoteDraftNotice(
-            "Reconnected and received the latest collaborative state. Save or refresh to reconcile local edits.",
+          mergeRemoteDraft(
+            payload.state.title ?? syncedTitleRef.current,
+            payload.state.content ?? syncedContentRef.current,
+            "the collaborative session",
           );
         }
         return;
@@ -556,21 +654,15 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
         );
 
         if (!dirty) {
-          setTitle(payload.payload.title ?? "");
-          setContent(payload.payload.content ?? "");
-          setDocument((current) =>
-            current
-              ? {
-                  ...current,
-                  title: payload.payload.title ?? current.title,
-                  content: payload.payload.content ?? current.content,
-                  updated_at: new Date().toISOString(),
-                }
-              : current,
+          applyRemoteSnapshot(
+            payload.payload.title ?? syncedTitleRef.current,
+            payload.payload.content ?? syncedContentRef.current,
           );
         } else {
-          setRemoteDraftNotice(
-            `Live update received from ${payload.sender.userName ?? "a collaborator"}. Save or refresh when ready.`,
+          mergeRemoteDraft(
+            payload.payload.title ?? syncedTitleRef.current,
+            payload.payload.content ?? syncedContentRef.current,
+            payload.sender.userName ?? "a collaborator",
           );
         }
         return;
@@ -695,6 +787,17 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     };
   });
 
+  const remoteSelections = remoteParticipants
+    .filter((participant) => participant.selection?.start != null && participant.selection?.end != null)
+    .map((participant) => ({
+      clientId: participant.clientId,
+      userName: participant.userName,
+      color: colorForClient(participant.clientId),
+      selectionStart: participant.selection?.start ?? participant.cursor?.position ?? null,
+      selectionEnd: participant.selection?.end ?? participant.cursor?.position ?? null,
+      selectedText: participant.selection?.text ?? "",
+    }));
+
   async function handleSaveVersion() {
     if (!document || !canCreateVersions(documentRole)) {
       return;
@@ -737,6 +840,8 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       setDocument(savedDocument);
       setTitle(savedDocument.title);
       setContent(savedDocument.content);
+      syncedTitleRef.current = savedDocument.title;
+      syncedContentRef.current = savedDocument.content;
       setPlainTextSnapshot(stripHtml(savedDocument.content));
       setDirty(false);
       setSavingState("saved");
@@ -815,6 +920,57 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       const message =
         requestError instanceof Error ? requestError.message : "Failed to remove access.";
       setShareError(message);
+    }
+  }
+
+  async function handleCreateShareLink() {
+    if (!document || !canManageSharing(documentRole)) {
+      return;
+    }
+
+    try {
+      await createShareLink(document.id, { role: shareRole });
+      await loadUsersAndShares(document.id, "owner");
+      setShareFeedback(`Created a ${shareRole} invite link.`);
+      setShareError(null);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to create share link.";
+      setShareError(message);
+    }
+  }
+
+  async function handleRevokeShareLink(linkId: number) {
+    if (!document || !canManageSharing(documentRole)) {
+      return;
+    }
+
+    try {
+      await revokeShareLink(document.id, linkId);
+      await loadUsersAndShares(document.id, "owner");
+      setShareFeedback("Share link revoked.");
+      setShareError(null);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Failed to revoke share link.";
+      setShareError(message);
+    }
+  }
+
+  async function handleCopyShareLink(link: DocumentShareLink) {
+    if (!document || typeof window === "undefined") {
+      return;
+    }
+
+    const inviteUrl = `${window.location.origin}/documents/${document.id}?invite=${link.token}`;
+
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setShareFeedback(`Copied ${link.role} invite link.`);
+      setShareError(null);
+    } catch {
+      setShareFeedback(inviteUrl);
+      setShareError(null);
     }
   }
 
@@ -944,6 +1100,19 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
     setSaveMessage(null);
     setAiState("ready");
     await updateAiStatus(aiInteractionId, appliedStatus);
+  }
+
+  async function handleApplyAiPartial(snippet: string) {
+    if (!snippet.trim()) {
+      return;
+    }
+
+    setLastAppliedSnapshot(content);
+    editorRef.current?.replaceSelection(snippet);
+    setDirty(true);
+    setSaveMessage(null);
+    setAiState("ready");
+    await updateAiStatus(aiInteractionId, "partially_applied");
   }
 
   function handleUndoAiApply() {
@@ -1127,10 +1296,11 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
               <RichTextEditor
                 ref={editorRef}
                 value={content}
+                remoteSelections={remoteSelections}
                 onChange={handleContentChange}
                 disabled={!canEdit(documentRole)}
                 showToolbar={false}
-                onSelectionChange={({ plainText, selectedText: nextSelectedText }) => {
+                onSelectionChange={({ plainText, selectedText: nextSelectedText, selectionStart, selectionEnd }) => {
                   setPlainTextSnapshot(plainText);
                   setSelectedText(nextSelectedText);
                   selectedTextRef.current = nextSelectedText;
@@ -1138,11 +1308,21 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     socketRef.current.send(
                       JSON.stringify({
                         type: "presence:update",
-                        selection: nextSelectedText
-                          ? {
-                              length: nextSelectedText.length,
-                            }
-                          : null,
+                        cursor:
+                          selectionStart !== null && selectionEnd !== null && selectionStart === selectionEnd
+                            ? {
+                                position: selectionStart,
+                              }
+                            : null,
+                        selection:
+                          selectionStart !== null && selectionEnd !== null
+                            ? {
+                                start: selectionStart,
+                                end: selectionEnd,
+                                length: Math.max(selectionEnd - selectionStart, 0),
+                                text: nextSelectedText.slice(0, 64),
+                              }
+                            : null,
                       })
                     );
                   }
@@ -1264,6 +1444,45 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                   ))}
                 </div>
 
+                {shareLinks.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">Invite links</div>
+                    {shareLinks.map((link) => (
+                      <div
+                        key={link.id}
+                        className="rounded-2xl border border-[rgba(27,36,48,0.06)] bg-[rgba(244,241,234,0.6)] px-4 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium text-slate-800">{link.role} link</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {link.revoked_at ? "Revoked" : `Created ${formatTimestamp(link.created_at)}`}
+                            </div>
+                          </div>
+                          {!link.revoked_at ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleCopyShareLink(link)}
+                                className="button-secondary h-9 rounded-full px-3 text-sm"
+                              >
+                                Copy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleRevokeShareLink(link.id)}
+                                className="button-secondary h-9 rounded-full px-3 text-sm"
+                              >
+                                Revoke
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
                 {canManageSharing(documentRole) ? (
                   <form onSubmit={handleShareDocument} className="space-y-3">
                     <input
@@ -1290,6 +1509,13 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
                     </select>
                     <button type="submit" className="button-secondary h-11 w-full rounded-full">
                       Share document
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateShareLink()}
+                      className="button-secondary h-11 w-full rounded-full"
+                    >
+                      Create share link
                     </button>
                   </form>
                 ) : null}
@@ -1394,6 +1620,7 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
               onGenerate={() => void handleGenerateAi()}
               onCancel={handleCancelAi}
               onApply={handleApplyAi}
+              onApplySelected={(snippet) => void handleApplyAiPartial(snippet)}
               onReject={handleRejectAi}
               onUndo={handleUndoAiApply}
               onClose={() => setShowAiPanel(false)}

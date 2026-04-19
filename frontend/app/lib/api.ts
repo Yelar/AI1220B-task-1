@@ -11,6 +11,7 @@ import type {
   AuthUser,
   DocumentPermission,
   DocumentRecord,
+  DocumentShareLink,
   DocumentVersion,
   HealthResponse,
 } from "./types";
@@ -193,6 +194,33 @@ export function upsertPermission(documentId: number, payload: { user_id: number;
 export function removePermission(documentId: number, userId: number) {
   return apiRequest<void>(`/documents/${documentId}/permissions/${userId}`, {
     method: "DELETE",
+  });
+}
+
+export function listShareLinks(documentId: number) {
+  return apiRequest<DocumentShareLink[]>(`/documents/${documentId}/share-links`);
+}
+
+export function createShareLink(
+  documentId: number,
+  payload: { role: "editor" | "viewer" },
+) {
+  return apiRequest<DocumentShareLink>(`/documents/${documentId}/share-links`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function revokeShareLink(documentId: number, linkId: number) {
+  return apiRequest<void>(`/documents/${documentId}/share-links/${linkId}`, {
+    method: "DELETE",
+  });
+}
+
+export function redeemShareLink(token: string) {
+  return apiRequest<DocumentPermission>("/documents/share-links/redeem", {
+    method: "POST",
+    body: { token },
   });
 }
 

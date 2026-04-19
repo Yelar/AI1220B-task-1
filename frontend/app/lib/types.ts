@@ -54,6 +54,15 @@ export type DocumentShare = {
   role: Exclude<UserRole, "owner">;
 };
 
+export type DocumentShareLink = {
+  id: number;
+  document_id: number;
+  role: Exclude<UserRole, "owner">;
+  token: string;
+  revoked_at: string | null;
+  created_at: string;
+};
+
 export type AccessibleDocument = {
   document: DocumentRecord;
 };

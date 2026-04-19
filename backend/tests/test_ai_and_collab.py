@@ -275,6 +275,77 @@ def test_document_history_can_include_other_users_with_access(client: TestClient
     assert items[0]["document_id"] == document["id"]
 
 
+def test_owner_can_create_and_revoke_share_link(client: TestClient):
+    register_user(client, "owner@example.com", "Owner Demo")
+    headers = login_headers(client, "owner@example.com")
+    document = create_document(client, headers)
+
+    create_response = client.post(
+        f"/api/documents/{document['id']}/share-links",
+        headers=headers,
+        json={"role": "viewer"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    share_link = create_response.json()
+    assert share_link["role"] == "viewer"
+    assert share_link["token"]
+    assert share_link["revoked_at"] is None
+
+    list_response = client.get(
+        f"/api/documents/{document['id']}/share-links",
+        headers=headers,
+    )
+    assert list_response.status_code == 200, list_response.text
+    assert len(list_response.json()) == 1
+
+    revoke_response = client.delete(
+        f"/api/documents/{document['id']}/share-links/{share_link['id']}",
+        headers=headers,
+    )
+    assert revoke_response.status_code == 204, revoke_response.text
+
+    list_after_revoke = client.get(
+        f"/api/documents/{document['id']}/share-links",
+        headers=headers,
+    )
+    assert list_after_revoke.status_code == 200, list_after_revoke.text
+    assert list_after_revoke.json()[0]["revoked_at"] is not None
+
+
+def test_user_can_redeem_share_link_for_document_access(client: TestClient):
+    owner = register_user(client, "owner@example.com", "Owner Demo")
+    invited = register_user(client, "invited@example.com", "Invited Demo")
+
+    owner_headers = login_headers(client, "owner@example.com")
+    invited_headers = login_headers(client, "invited@example.com")
+    document = create_document(client, owner_headers)
+
+    create_response = client.post(
+        f"/api/documents/{document['id']}/share-links",
+        headers=owner_headers,
+        json={"role": "editor"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    token = create_response.json()["token"]
+
+    redeem_response = client.post(
+        "/api/documents/share-links/redeem",
+        headers=invited_headers,
+        json={"token": token},
+    )
+    assert redeem_response.status_code == 200, redeem_response.text
+    payload = redeem_response.json()
+    assert payload["document_id"] == document["id"]
+    assert payload["user_id"] == invited["id"]
+    assert payload["role"] == "editor"
+
+    read_response = client.get(
+        f"/api/documents/{document['id']}",
+        headers=invited_headers,
+    )
+    assert read_response.status_code == 200, read_response.text
+
+
 def test_ai_streaming_emits_sse_events_and_updates_history(client: TestClient, monkeypatch):
     register_user(client, "owner@example.com", "Owner Demo")
     headers = login_headers(client, "owner@example.com")
