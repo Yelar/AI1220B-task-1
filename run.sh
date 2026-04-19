@@ -44,8 +44,7 @@ if [ ! -d "node_modules" ]; then
 fi
 
 if [ ! -f ".env.local" ]; then
-  cp .env.example .env.local
-  echo "Created frontend/.env.local from frontend/.env.example"
+  echo "No frontend/.env.local found. Using default local API and WebSocket settings."
 fi
 
 echo "Starting backend on http://127.0.0.1:8000 ..."
