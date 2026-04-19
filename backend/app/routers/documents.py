@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from secrets import token_urlsafe
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -7,12 +10,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.identity import resolve_http_user
-from app.models import Document, DocumentPermission, DocumentVersion, User
+from app.models import Document, DocumentPermission, DocumentShareLink, DocumentVersion, User
 from app.schemas import (
     DocumentCreate,
     DocumentPermissionCreate,
     DocumentPermissionRead,
     DocumentRead,
+    DocumentShareLinkCreate,
+    DocumentShareLinkRead,
+    DocumentShareLinkRedeemRequest,
     DocumentUpdate,
     DocumentVersionCreate,
     DocumentVersionRead,
@@ -527,3 +533,173 @@ def delete_permission(
 
     db.delete(permission)
     db.commit()
+
+
+@router.get(
+    "/{document_id}/share-links",
+    response_model=list[DocumentShareLinkRead],
+    summary="List document share links",
+    description="Return configurable share links for a document if the authenticated user is the owner.",
+)
+def list_share_links(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    require_document_role(document, current_user, db, {"owner"})
+
+    statement = (
+        select(DocumentShareLink)
+        .where(DocumentShareLink.document_id == document_id)
+        .order_by(DocumentShareLink.created_at.desc(), DocumentShareLink.id.desc())
+    )
+    return db.scalars(statement).all()
+
+
+@router.post(
+    "/{document_id}/share-links",
+    response_model=DocumentShareLinkRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a document share link",
+    description="Create a role-scoped share link for a document if the authenticated user is the owner.",
+)
+def create_share_link(
+    document_id: int,
+    payload: DocumentShareLinkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    require_document_role(document, current_user, db, {"owner"})
+
+    if payload.role == "owner":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Share links can only grant editor or viewer access.",
+        )
+
+    share_link = DocumentShareLink(
+        document_id=document_id,
+        created_by_user_id=current_user.id,
+        token=token_urlsafe(24),
+        role=payload.role,
+    )
+    db.add(share_link)
+    db.commit()
+    db.refresh(share_link)
+    return share_link
+
+
+@router.delete(
+    "/{document_id}/share-links/{link_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke a document share link",
+    description="Revoke a share link if the authenticated user is the owner of the document.",
+)
+def revoke_share_link(
+    document_id: int,
+    link_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    require_document_role(document, current_user, db, {"owner"})
+
+    share_link = db.scalar(
+        select(DocumentShareLink).where(
+            DocumentShareLink.id == link_id,
+            DocumentShareLink.document_id == document_id,
+        )
+    )
+    if share_link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share link not found.",
+        )
+
+    share_link.revoked_at = datetime.now(timezone.utc)
+    db.add(share_link)
+    db.commit()
+
+
+@router.post(
+    "/share-links/redeem",
+    response_model=DocumentPermissionRead,
+    summary="Redeem a document share link",
+    description="Grant access to the authenticated user using a valid non-revoked share link.",
+)
+def redeem_share_link(
+    payload: DocumentShareLinkRedeemRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    share_link = db.scalar(
+        select(DocumentShareLink).where(DocumentShareLink.token == payload.token)
+    )
+    if share_link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share link not found.",
+        )
+
+    if share_link.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This share link has been revoked.",
+        )
+
+    document = db.get(Document, share_link.document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    if document.owner_id == current_user.id:
+        return DocumentPermissionRead(
+            id=0,
+            document_id=document.id,
+            user_id=current_user.id,
+            role="owner",
+        )
+
+    permission = db.scalar(
+        select(DocumentPermission).where(
+            DocumentPermission.document_id == document.id,
+            DocumentPermission.user_id == current_user.id,
+        )
+    )
+
+    if permission is None:
+        permission = DocumentPermission(
+            document_id=document.id,
+            user_id=current_user.id,
+            role=share_link.role,
+        )
+        db.add(permission)
+    else:
+        permission.role = share_link.role
+        db.add(permission)
+
+    db.commit()
+    db.refresh(permission)
+    return permission

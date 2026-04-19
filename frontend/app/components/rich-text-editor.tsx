@@ -8,10 +8,22 @@ import {
   useRef,
   type MouseEvent,
 } from "react";
+import type { CSSProperties } from "react";
 
 type SelectionPayload = {
   selectedText: string;
   plainText: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+};
+
+type RemoteSelection = {
+  clientId: string;
+  userName: string;
+  color: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+  selectedText?: string;
 };
 
 export type RichTextEditorHandle = {
@@ -27,6 +39,7 @@ type RichTextEditorProps = {
   disabled?: boolean;
   placeholder?: string;
   showToolbar?: boolean;
+  remoteSelections?: RemoteSelection[];
   onChange: (value: string) => void;
   onSelectionChange?: (payload: SelectionPayload) => void;
 };
@@ -60,7 +73,7 @@ function normalizeHtml(value: string) {
 }
 
 const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
-  { value, disabled = false, placeholder, showToolbar = true, onChange, onSelectionChange },
+  { value, disabled = false, placeholder, showToolbar = true, remoteSelections = [], onChange, onSelectionChange },
   ref,
 ) {
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -77,16 +90,26 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
       onSelectionChange?.({
         selectedText: "",
         plainText: htmlToPlainText(editor.innerHTML),
+        selectionStart: null,
+        selectionEnd: null,
       });
       return;
     }
 
     const range = selection.getRangeAt(0);
     if (range.commonAncestorContainer && editor.contains(range.commonAncestorContainer)) {
+      const editorRange = document.createRange();
+      editorRange.selectNodeContents(editor);
+      editorRange.setEnd(range.startContainer, range.startOffset);
+      const selectionStart = editorRange.toString().length;
+      const selectionEnd = selectionStart + selection.toString().length;
+
       rangeRef.current = range.cloneRange();
       onSelectionChange?.({
         selectedText: selection.toString(),
         plainText: htmlToPlainText(editor.innerHTML),
+        selectionStart,
+        selectionEnd,
       });
       return;
     }
@@ -94,6 +117,8 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
     onSelectionChange?.({
       selectedText: "",
       plainText: htmlToPlainText(editor.innerHTML),
+      selectionStart: null,
+      selectionEnd: null,
     });
   }, [onSelectionChange]);
 
@@ -203,6 +228,8 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
     event.preventDefault();
   }
 
+  const plainTextLength = Math.max(htmlToPlainText(value).trimEnd().length, 1);
+
   return (
     <div className="space-y-4">
       {showToolbar ? (
@@ -222,16 +249,46 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(fun
         </div>
       ) : null}
 
-      <div
-        ref={editorRef}
-        contentEditable={!disabled}
-        suppressContentEditableWarning
-        className={`rich-editor ${disabled ? "rich-editor-disabled" : ""}`}
-        data-placeholder={placeholder}
-        onInput={emitChange}
-        onKeyUp={syncSelection}
-        onMouseUp={syncSelection}
-      />
+      <div className="rich-editor-shell">
+        <div className="rich-editor-remote-layer" aria-hidden="true">
+          {remoteSelections.map((entry) => {
+            const start = Math.max(entry.selectionStart ?? 0, 0);
+            const end = Math.max(entry.selectionEnd ?? start, start);
+            const rangeLength = Math.max(end - start, 0);
+            const topPercent = Math.min((start / plainTextLength) * 100, 96);
+            const heightPercent = Math.max((rangeLength / plainTextLength) * 100, 2.2);
+
+            return (
+              <div
+                key={entry.clientId}
+                className="remote-selection-marker"
+                style={
+                  {
+                    top: `${topPercent}%`,
+                    height: `${Math.min(heightPercent, 26)}%`,
+                    "--remote-selection-color": entry.color,
+                  } as CSSProperties
+                }
+              >
+                <span className="remote-selection-label">
+                  {entry.userName}
+                  {entry.selectedText ? `: ${entry.selectedText.slice(0, 18)}` : " cursor"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div
+          ref={editorRef}
+          contentEditable={!disabled}
+          suppressContentEditableWarning
+          className={`rich-editor ${disabled ? "rich-editor-disabled" : ""}`}
+          data-placeholder={placeholder}
+          onInput={emitChange}
+          onKeyUp={syncSelection}
+          onMouseUp={syncSelection}
+        />
+      </div>
     </div>
   );
 });

@@ -61,6 +61,10 @@ class Document(Base):
         back_populates="document",
         cascade="all, delete-orphan",
     )
+    share_links: Mapped[list["DocumentShareLink"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
     ai_interactions: Mapped[list["AIInteraction"]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
@@ -103,6 +107,33 @@ class DocumentVersion(Base):
     )
 
     document: Mapped["Document"] = relationship(back_populates="versions")
+
+
+class DocumentShareLink(Base):
+    __tablename__ = "document_share_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+    token: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(20))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    document: Mapped["Document"] = relationship(back_populates="share_links")
+    created_by_user: Mapped["User"] = relationship()
 
 
 class AIInteraction(Base):

@@ -1,173 +1,226 @@
 # Architecture Deviations (Assignment 2)
 
-This document records the main differences between the Assignment 1 design in [report.md](/Users/yelarys.yertaiuly/Downloads/swe-task1/AI1220B-task-1/report.md) and the final Assignment 2 implementation.
+This document records the main differences between the Assignment 1 design in `assignment-1-archive/report.md` and the final Assignment 2 implementation.
 
-The point is not to claim the design stayed unchanged. It did not. The goal is to document what changed, why it changed, and whether the result was an improvement or a compromise.
+The goal is not to pretend the design stayed unchanged. It did not. The goal is to document what changed, why it changed, and whether the final result should be read as an improvement or a compromise.
 
 ## Summary
 
 | Area | Assignment 1 Position | Final Implementation | Assessment |
 |---|---|---|---|
-| Authentication | Local demo identities and simple role switching for PoC testing | Real JWT auth with registration, login, refresh, and protected routes | Improvement |
-| Roles | `owner`, `editor`, `commenter`, `viewer` | `owner`, `editor`, `viewer` | Compromise to match Assignment 2 baseline |
-| AI transport | Non-streaming AI invocation was acceptable for the Assignment 1 PoC | Streaming AI over SSE with progressive frontend rendering and cancellation | Improvement |
-| Collaboration model | WebSocket collaboration scaffold, with future room for stronger consistency | Authenticated WebSocket sync with presence and reconnect, but still basic last-write-wins | Compromise |
-| AI region coordination | Assignment 1 described pending-region awareness during AI work | Final system keeps suggestion history and review UX, but does not implement full region-level locking/soft-locking | Compromise |
-| Data store | Local SQLite, with future path to PostgreSQL | Local SQLite retained | No deviation |
-| AI provider | LM Studio via local OpenAI-compatible API | LM Studio via local OpenAI-compatible API | No deviation |
+| Authentication | Local/demo-oriented identity flow for PoC iteration | Real JWT authentication with registration, login, refresh, and protected routes | Improvement |
+| Role model | Four-role model with a richer collaboration concept | Final runtime uses `owner`, `editor`, and `viewer` with full server-side enforcement | Compromise |
+| AI transport | Non-streaming or simple request/response flow was acceptable for the PoC | Streaming AI over SSE with progressive rendering and cancellation | Improvement |
+| Collaboration transport | WebSocket scaffold with stronger consistency deferred | Authenticated WebSocket sync with presence, reconnect, visual remote selections, and safe merge handling for non-overlapping concurrent edits | Improvement |
+| AI collaboration UX | Early design discussed richer region awareness during AI work | Final system focuses on suggestion review, undo, history, and partial acceptance | Compromise |
+| Sharing model | Direct user-based sharing was central | Direct sharing retained and extended with share-by-link invitation flows | Improvement |
+| Data store | Local SQLite with room for future migration | Local SQLite retained | No deviation |
+| AI provider | LM Studio via local OpenAI-compatible API | LM Studio retained, with optional mock mode for evaluation | Improvement |
+| Quality verification | Testing expectations were broad and still conceptual | Backend tests, frontend tests, lint, build, and Playwright E2E verification are included | Improvement |
 
 ## 1. Authentication and Sessions
 
-**What changed**
+### What changed
 
-Assignment 1 used local demo identities and simple role-aware behavior to keep the PoC easy to run. Assignment 2 now uses:
+Assignment 1 used a lightweight local identity model suitable for early UI and architecture validation. Assignment 2 now uses:
 
 - password-based registration and login
-- bcrypt password hashing
+- hashed passwords
 - JWT access tokens
 - JWT refresh tokens
-- protected API routes
-- persisted frontend session handling
+- protected REST routes
+- authenticated WebSocket sessions
+- persisted frontend session storage with refresh handling
 
-**Why it changed**
+### Why it changed
 
-Assignment 2 explicitly requires real authentication and session handling. The Assignment 1 model was intentionally lightweight, but it was not sufficient for the final implementation requirements.
+Assignment 2 explicitly requires real authentication and session handling. The Assignment 1 model was intentionally lightweight and useful for the PoC, but it was not sufficient for the final implementation.
 
-**Assessment**
+### Assessment
 
-Improvement. This is a direct maturity step from the Assignment 1 PoC into a secure implementation while still keeping the system local-first.
+Improvement. This is a direct maturity step from a prototype identity model to a secure implementation that satisfies the brief.
 
-## 2. Role Model
+## 2. Role Model and Access Control
 
-**What changed**
+### What changed
 
-Assignment 1 modeled four roles:
-
-- `owner`
-- `editor`
-- `commenter`
-- `viewer`
-
-The final implementation uses:
+The Assignment 1 design described a richer collaboration permission model. The final runtime standardizes on:
 
 - `owner`
 - `editor`
 - `viewer`
 
-**Why it changed**
+The final implementation also enforces permissions on the backend for document access, editing, AI use, versioning, and sharing operations.
 
-Assignment 2 requires at least three roles with server-side enforcement. The `commenter` role was removed to keep the final system aligned with the baseline deliverable and to avoid implementing a partial comment workflow with no dedicated commenting UI.
+### Why it changed
 
-**Assessment**
+The Assignment 2 brief requires at least three roles with server-side enforcement. The final implementation prioritizes a coherent end-to-end permission model aligned with the rubric rather than keeping extra roles that would require a larger unfinished moderation or commenting workflow.
 
-Compromise. The Assignment 1 role model was richer, but the final implementation focuses on the required baseline and on keeping the permission model coherent end-to-end.
+### Assessment
 
-## 3. AI Request Flow
+Compromise. The conceptual design space in Assignment 1 was broader, but the submitted runtime is more coherent, fully enforced, and better aligned with the grading brief.
 
-**What changed**
+## 3. AI Request and Streaming Flow
 
-Assignment 1 documented a simple request/response AI flow where the frontend called the backend and waited for the full model response. The final implementation now supports:
+### What changed
 
-- streaming AI responses over SSE
+Assignment 1 allowed a simpler request/response AI interaction model. The final implementation now provides:
+
+- SSE-based streamed AI output
 - progressive rendering in the frontend
-- user cancellation
-- preserved AI history and suggestion status
+- cancellation of in-progress generation
+- AI interaction history
+- accept, reject, edit-before-apply, undo, and partial acceptance workflows
 
-**Why it changed**
+### Why it changed
 
-Assignment 2 makes streaming a hard requirement. The earlier flow was acceptable only for the first PoC.
+Streaming is a hard requirement in Assignment 2, and the final system needed a complete end-to-end AI flow rather than a blocking call with a delayed full response.
 
-**Assessment**
+### Assessment
 
-Improvement. This is a clear upgrade over the Assignment 1 PoC and better matches the intended product experience.
+Improvement. This is a clear upgrade over the Assignment 1 PoC and closely matches the expected Assignment 2 user experience.
 
 ## 4. Collaboration Consistency Model
 
-**What changed**
+### What changed
 
-Assignment 1 positioned the WebSocket layer as a collaboration scaffold and explicitly left room for stronger conflict handling in later iterations. The final implementation provides:
+Assignment 1 treated the WebSocket layer as a collaboration scaffold and explicitly left stronger conflict handling for later iterations. The final system now provides:
 
-- authenticated WebSocket connections
+- authenticated WebSocket sessions
 - presence sync
-- reconnect and session resync
-- document update broadcasting
+- reconnect and session resynchronization
+- live document update propagation
+- remote cursor and selection awareness in the editor
+- merge assistance for non-overlapping concurrent text changes while preserving the local draft on overlap
 
-It still uses a basic last-write-wins model rather than CRDT or OT conflict resolution.
+The implementation still does not use CRDT or OT.
 
-**Why it changed**
+### Why it changed
 
-The team prioritized a reliable baseline implementation that satisfies the Assignment 2 requirements without taking on the complexity and risk of a CRDT/OT system late in the cycle.
+The team prioritized a reliable collaboration layer that satisfies the rubric, supports a live demo, and improves safety under common concurrent-edit cases without introducing a late full-scale CRDT/OT rewrite.
 
-**Assessment**
+### Assessment
 
-Compromise. The final collaboration model is suitable for the assignment demo and local testing, but it is not production-grade concurrent editing under adversarial edits.
+Improvement. The final collaboration layer is stronger than a pure last-write-wins snapshot model, even though it intentionally stops short of full CRDT/OT conflict resolution.
 
 ## 5. AI Coordination During Collaboration
 
-**What changed**
+### What changed
 
-Assignment 1 described region-level awareness during AI work, including the idea that the frontend could mark a selected region as pending while AI was processing it. The final implementation instead provides:
+Assignment 1 discussed richer region-aware AI coordination during collaborative editing. The final implementation focuses on:
 
-- streamed suggestion generation
-- compare/edit/apply/reject UX
+- suggestion review before application
+- edited application
+- partial acceptance
 - undo after acceptance
 - AI interaction history per document
 
-It does not implement dedicated region-level AI locking or soft-lock indicators for other collaborators.
+It does not implement explicit region locking or soft-lock banners for other collaborators while an AI request is running.
 
-**Why it changed**
+### Why it changed
 
-The team focused on the baseline Assignment 2 deliverables: streaming, cancellation, review UX, and history. Region-level coordination was judged lower priority than getting the full end-to-end AI flow working reliably.
+The team prioritized the hard Assignment 2 AI deliverables first: streaming, cancellation, review UX, history, and document-safe application behavior.
 
-**Assessment**
+### Assessment
 
-Compromise. The implemented UX is strong enough for the assignment, but it does not fully realize the collaborative AI-awareness idea from Assignment 1.
+Compromise. The implemented AI UX is strong and rubric-aligned, but it does not fully realize the richer region-coordination concept from Assignment 1.
 
-## 6. Local-First Infrastructure
+## 6. Sharing Model
 
-**What changed**
+### What changed
 
-No material change. The final system still uses:
+Assignment 1 emphasized direct permission-based sharing between users. The final implementation retains that model and extends it with:
+
+- owner-managed direct sharing by email lookup
+- role assignment for `editor` and `viewer`
+- revocation of direct permissions
+- share-by-link invitation flow
+- revocation of invitation links
+
+### Why it changed
+
+Direct sharing remained the baseline requirement, while share-by-link was added to provide a more complete collaboration workflow and satisfy the bonus rubric more strongly.
+
+### Assessment
+
+Improvement. The final sharing model is broader and more practical than the original baseline proposal.
+
+## 7. Local-First Infrastructure
+
+### What changed
+
+No material architectural change. The final system still uses:
 
 - Next.js on the frontend
 - FastAPI on the backend
 - SQLite for local persistence
 - LM Studio as the local LLM provider
 
-**Why it stayed the same**
+The final backend also supports mock AI mode to simplify evaluation when a local model is unavailable.
 
-This part of the Assignment 1 design was correct for the course goals: easy local setup, no cloud dependency, and low friction for evaluation.
+### Why it stayed largely the same
 
-**Assessment**
+This part of the Assignment 1 design already matched the course goals well: local setup, low friction for evaluation, and no deployment dependency.
 
-No deviation. This remains one of the strongest parts of the original design.
+### Assessment
 
-## 7. Practical Consequences
+No major deviation. This remains one of the strongest aspects of the original design.
+
+## 8. Testing and Verification
+
+### What changed
+
+Assignment 1 discussed testing goals at a planning level. The final repository now includes concrete verification steps:
+
+- backend `pytest` coverage for auth, permissions, documents, AI, and WebSocket behavior
+- frontend component tests with `Vitest`
+- frontend lint and production build checks
+- Playwright E2E coverage for login through AI suggestion acceptance
+
+### Why it changed
+
+Assignment 2 requires a working submission rather than a design-only artifact, so the repository needed executable verification commands and working automated tests.
+
+### Assessment
+
+Improvement. The final repo has stronger evidence for quality and evaluator reproducibility than the original Assignment 1 plan.
+
+## 9. Completed Bonus Features
+
+The final implementation includes the following bonus work:
+
+- remote cursor and selection tracking rendered in the editor
+- share-by-link invitations with configurable permissions and revocation
+- partial acceptance of AI suggestions
+- Playwright end-to-end test coverage for the login-to-AI-acceptance flow
+
+## 10. Practical Consequences
 
 ### Improvements
 
-- Stronger security and session handling than the Assignment 1 PoC
-- Streaming AI that matches the final assignment requirements
-- Better frontend workflow around AI review and document editing
-- Authenticated collaboration instead of open document sockets
+- Real authentication and session handling
+- Streamed AI with cancellation and review UX
+- Stronger collaboration behavior than a pure last-write-wins snapshot flow
+- Share-by-link support in addition to direct sharing
+- Automated verification across backend, frontend, and E2E layers
 
 ### Compromises
 
-- No `commenter` role in the final runtime
-- No CRDT/OT conflict resolution
-- No dedicated region-level AI soft-locking during collaboration
+- The final role system is narrower than the broader design space explored in Assignment 1
+- The collaboration layer does not implement CRDT or OT
+- Region-level AI locking/soft-locking during collaboration was not prioritized into the final runtime
 
 ## Final Note
 
-The final system is consistent with the Assignment 1 direction at the architecture level:
+The final system remains architecturally consistent with the Assignment 1 direction:
 
-- local-first
+- local-first evaluation
 - FastAPI backend
 - Next.js frontend
 - SQLite persistence
 - LM Studio integration
 - document versions
-- role-based access
+- role-based access control
 - real-time collaboration
 
-The main differences are the move from a lightweight Assignment 1 PoC to a secure and streamed Assignment 2 implementation, plus a few deliberate scope reductions where the richer Assignment 1 ideas were not worth the added complexity.
+The main differences come from maturing the design into a working Assignment 2 implementation: stronger security, streamed AI, richer sharing, stronger collaboration UX, and executable verification for the final submission.

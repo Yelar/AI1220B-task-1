@@ -415,6 +415,50 @@ a:focus-visible {
   white-space: pre-wrap;
 }
 
+.rich-editor-shell {
+  position: relative;
+}
+
+.rich-editor-remote-layer {
+  pointer-events: none;
+  position: absolute;
+  left: -3rem;
+  top: 1rem;
+  bottom: 1rem;
+  width: 2.35rem;
+}
+
+.remote-selection-marker {
+  position: absolute;
+  left: 0.9rem;
+  width: 0.4rem;
+  min-height: 0.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--remote-selection-color) 76%, white);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--remote-selection-color) 18%, transparent);
+}
+
+.remote-selection-label {
+  position: absolute;
+  left: 0.7rem;
+  top: -0.15rem;
+  display: inline-flex;
+  max-width: 10rem;
+  align-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--remote-selection-color) 94%, white);
+  color: white;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  box-shadow: 0 10px 20px rgba(24, 38, 52, 0.14);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .rich-editor:empty::before {
   content: attr(data-placeholder);
   color: #7e8896;

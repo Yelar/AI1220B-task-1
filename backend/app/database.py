@@ -58,6 +58,11 @@ def ensure_local_schema() -> None:
         if inspector.has_table("document_versions")
         else set()
     )
+    document_share_links_columns = (
+        {column["name"] for column in inspector.get_columns("document_share_links")}
+        if inspector.has_table("document_share_links")
+        else set()
+    )
     ai_interactions_columns = {
         column["name"] for column in inspector.get_columns("ai_interactions")
     } if inspector.has_table("ai_interactions") else set()
@@ -67,11 +72,15 @@ def ensure_local_schema() -> None:
         and inspector.has_table("documents")
         and inspector.has_table("document_permissions")
         and inspector.has_table("document_versions")
+        and inspector.has_table("document_share_links")
         and inspector.has_table("ai_interactions")
         and {"email", "name", "password_hash", "created_at"}.issubset(users_columns)
         and "owner_id" in documents_columns
         and {"document_id", "user_id", "role"}.issubset(document_permissions_columns)
         and {"document_id", "label", "content", "created_at"}.issubset(document_versions_columns)
+        and {"document_id", "created_by_user_id", "token", "role", "revoked_at", "created_at"}.issubset(
+            document_share_links_columns
+        )
         and "user_id" in ai_interactions_columns
         and {"feature", "prompt_excerpt", "response_text", "model_name", "status"}.issubset(
             ai_interactions_columns
