@@ -1,76 +1,74 @@
 # Collaborative Document Editor with AI Writing Assistant
 
-## Overview
+Implementation submission for AI1220 Assignment 2.
 
-This project implements a collaborative document editor with an AI writing assistant.
+This project builds the Assignment 1 design into a working local-first system with:
 
-It is built using:
-- **Frontend:** Next.js (React)
-- **Backend:** FastAPI
-- **Database:** SQLite (local-first)
-- **AI:** LM Studio (local LLM)
+- `Next.js` frontend
+- `FastAPI` backend
+- `SQLite` persistence
+- `JWT` authentication
+- streamed AI suggestions via `SSE`
+- authenticated real-time collaboration via `WebSocket`
 
-The system supports document editing, versioning, sharing, and AI-assisted writing, with secure authentication and backend testing.
+## Implemented Scope
 
----
+### Core application
 
-## Features
+- Registration, login, and refresh-token flow
+- Secure password hashing with `bcrypt`
+- Protected API routes
+- Document CRUD with metadata and dashboard listing
+- Rich-text editing with headings, bold, italic, lists, and code blocks
+- Auto-save with status feedback
+- Version history and restore
+- Server-side sharing and access control with `owner`, `editor`, and `viewer` roles
 
-### Authentication
-- User registration and login
-- Secure password hashing using bcrypt
-- JWT-based authentication
-- Access and refresh tokens
-- Protected API endpoints
+### Real-time collaboration
 
-### Document Management
-- Create, read, update, and delete documents
-- Version history with restore functionality
-- Automatic version creation
-- Export documents (txt, markdown, JSON)
+- Authenticated WebSocket document sessions
+- Live document update propagation
+- Presence and activity awareness
+- Reconnect and session resynchronization
+- Baseline last-write-wins synchronization
 
-### Access Control
-- Role-based permissions:
-  - Owner
-  - Editor
-  - Viewer
-- Server-side enforcement of permissions
-- Document sharing between users
+### AI assistant
 
-### AI Writing Assistant
-- Supports:
-  - Rewrite
-  - Summarize
-  - Translate
-  - Restructure
-- Uses LM Studio local API
-- Logs AI interaction history
-- Context-aware prompt construction
-- Safe output sanitization
+- Streamed AI responses
+- Supported features: `rewrite`, `summarize`, `translate`, `restructure`
+- Cancel in-progress generation
+- Suggestion review workflow: compare, edit, apply, reject, undo
+- Configurable prompt-building module
+- AI interaction history per document
 
-### Real-Time Collaboration
-- WebSocket-based updates
-- Presence tracking
-- Basic real-time document updates (last-write-wins)
+### Testing and documentation
 
-### Testing
-- Backend tests using pytest
-- Covers authentication, permissions, document CRUD, AI functionality, and WebSocket behavior
+- Backend `pytest` suite for auth, documents, permissions, AI, and WebSocket behavior
+- Frontend component tests with `Vitest` and React Testing Library
+- FastAPI auto-generated API docs with route descriptions and schemas
+- Architecture deviation notes in `DEVIATIONS.md`
 
----
+## Repository Structure
 
-## Project Structure
+```text
 AI1220B-task-1/
-├── run.sh
 ├── README.md
 ├── DEVIATIONS.md
+├── run.sh
+├── report.pdf
+├── report.md
+├── meeting_log.md
+├── team-task-division.md
+├── diagrams/
 ├── backend/
-├── frontend/
+└── frontend/
+```
 
-## Local setup
+## Local Setup
 
+The system can be started using `run.sh` or manually.
 
-### Run Backend
+### 1. Backend
 
 ```bash
 cd backend
@@ -81,71 +79,135 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
+Backend URLs:
 
-### 2. Start LM Studio or enable mock mode
+- API root: `http://127.0.0.1:8000/api`
+- Swagger UI: `http://127.0.0.1:8000/docs`
 
-Run LM Studio locally, enable the server, and set the base URL and model name in `backend/.env`.
+### 2. LM Studio or mock mode
 
-If you want to run the PoC without LM Studio first, set `LLM_MOCK=true` in `backend/.env`.
+In `backend/.env`, either:
 
-### 3. Start the frontend
+- point the backend to a running LM Studio server, or
+- set `LLM_MOCK=true` to test the full flow without a local model
+
+Important backend variables are documented in `backend/.env.example`.
+
+### 3. Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local
 npm run dev
 ```
 
-Frontend runs at `http://localhost:3000`. Backend runs at `http://127.0.0.1:8000`.
+Frontend URL:
 
-## Deliverables Included
+- `http://localhost:3000`
 
-- Running source code in `frontend/` and `backend/`
-- Final written report as `report.pdf`
-- Editable Mermaid architecture and data-model diagrams in `diagrams/`
-- Team process notes in `meeting_log.md` and `team-task-division.md`
+The frontend works with its default local API settings even without a `.env.local` file.
+
+Optional frontend overrides:
+
+- `NEXT_PUBLIC_API_BASE_URL`
+- `NEXT_PUBLIC_WS_BASE_URL`
+- `NEXT_PUBLIC_AUTH_MODE`
+
+## One-Command Script
+
+A helper script is included at `run.sh` to prepare dependencies and start both services:
+
+```bash
+./run.sh
+```
+
+## Demo Flow
+
+The live demo can be run in this order:
+
+1. Register a user and log in.
+2. Create a document and edit it in the rich-text editor.
+3. Observe auto-save status updates.
+4. Share the document with another user as `editor` or `viewer`.
+5. Open the same document in two sessions and show live collaboration.
+6. Invoke the AI assistant with streaming output and cancellation.
+7. Apply or reject a suggestion and review AI history.
+8. Create a version and restore a previous version.
 
 ## API Surface
 
+### Health
+
 - `GET /api/health`
+
+### Users and authentication
+
+- `POST /api/users/register`
+- `POST /api/users/login`
+- `POST /api/users/refresh`
+- `GET /api/users/me`
+- `GET /api/users`
+
+### Documents
+
 - `GET /api/documents`
 - `POST /api/documents`
 - `GET /api/documents/{id}`
 - `PATCH /api/documents/{id}`
 - `DELETE /api/documents/{id}`
+- `GET /api/documents/{id}/export?format=md|txt|json`
+
+### Versions
+
 - `GET /api/documents/{id}/versions`
 - `POST /api/documents/{id}/versions`
 - `POST /api/documents/{id}/versions/{version_id}/revert`
+
+### Sharing and permissions
+
 - `GET /api/documents/{id}/permissions`
 - `POST /api/documents/{id}/permissions`
 - `DELETE /api/documents/{id}/permissions/{user_id}`
-- `GET /api/documents/{id}/export?format=md|txt|json`
+
+### AI
+
 - `POST /api/ai/invoke`
+- `POST /api/ai/stream`
 - `GET /api/ai/history`
-- `GET /api/users`
-- `GET /api/users/me`
+- `PATCH /api/ai/history/{interaction_id}`
+
+### Collaboration
+
 - `WS /ws/documents/{document_id}`
 
+## Testing
 
-Authentication:
-- Register → Login → Authorize using Bearer token
+### Backend
 
-## Environment Configuration
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+```
 
-- Create a .env file in backend/ based on .env.example.
+### Frontend
 
-Example:
+```bash
+cd frontend
+npm install
+npm test
+```
 
-JWT_SECRET_KEY=change-me-access-secret
-JWT_REFRESH_SECRET_KEY=change-me-refresh-secret
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_MINUTES=10080
+## Deliverables Included
 
+- Source code in `frontend/` and `backend/`
+- Final report in `report.pdf`
+- Editable architecture and data-model diagrams in `diagrams/`
+- Assignment 1 to Assignment 2 deviation report in `DEVIATIONS.md`
+- Team process notes in `meeting_log.md` and `team-task-division.md`
 
-## Troubleshooting
+## Notes for Evaluators
 
-- If AI responses do not work, verify LM Studio is running and the model name in `backend/.env` matches the loaded model.
-- If the frontend cannot reach the backend, confirm the frontend uses `http://127.0.0.1:8000` and the backend is started before `npm run dev`.
-- If local testing behaves inconsistently, remove the local SQLite file under `backend/data/` and restart the backend to rebuild it.
+- The baseline collaboration model is intentionally simple and uses last-write-wins rather than CRDT/OT conflict resolution.
+- AI suggestions are non-destructive until the user explicitly applies them.
+- The implementation remains aligned with the Assignment 1 architecture, and all intentional changes are documented in `DEVIATIONS.md`.
