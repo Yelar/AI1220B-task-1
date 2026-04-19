@@ -1,70 +1,50 @@
 # Team Task Division - Assignment 2
 
-Use this file as the shared work board for humans and coding agents.
+Use this file as the final Assignment 2 work summary for humans and coding agents.
 
-The codebase already contains the Assignment 1 PoC. Assignment 2 work must extend the existing repo in `AI1220B-task-1/`, not start a new project.
+The implementation was completed in the existing `AI1220B-task-1/` repository and merged into `main`. This file now records what was owned, what was delivered, and what process rules were followed.
 
-## Current Starting Point
+## Final Status
 
-- [x] Repo root is `AI1220B-task-1/`
-- [x] Frontend stack is `Next.js` with React and TypeScript
-- [x] Backend stack is `FastAPI`
-- [x] Local persistence already exists
-- [x] Document CRUD already exists
-- [x] Basic versioning already exists
-- [x] Basic sharing/permissions already exist
-- [x] Basic AI integration already exists
-- [x] Basic WebSocket collaboration already exists
+- [x] Assignment 2 work was built on top of the Assignment 1 codebase
+- [x] Final code is merged into `main`
+- [x] Frontend, backend, and AI/collaboration work streams were integrated into one system
+- [x] Backend tests pass
+- [x] Frontend tests pass
+- [x] Frontend lint passes
+- [x] Frontend production build passes
+- [x] Local run script exists
+- [x] README and deviations documentation exist
 
-## What Assignment 2 Adds
+## Implemented Assignment 2 Scope
 
-- [ ] JWT registration, login, refresh, and protected routes
-- [ ] Rich-text editor with auto-save
-- [ ] Real-time collaboration with authenticated WebSockets
-- [ ] Streaming AI responses
-- [ ] Suggestion compare/apply/reject/edit UX
-- [ ] Backend and frontend tests for the final implementation
-- [ ] One-command local startup
-- [ ] Architecture deviation documentation
+- [x] JWT registration, login, refresh, and protected routes
+- [x] Rich-text editor with auto-save
+- [x] Real-time collaboration with authenticated WebSockets
+- [x] Streaming AI responses
+- [x] Suggestion compare/apply/reject/edit UX
+- [x] Backend and frontend tests for the final implementation
+- [x] One-command local startup
+- [x] Architecture deviation documentation
 
-## Working Rules
+## Process Rules Used
 
-- [ ] Always branch from latest `main`
-- [ ] One branch per task or tightly related task set
-- [ ] Push your branch to the same repo: `AI1220B-task-1`
-- [ ] Open a PR before merging to `main`
-- [ ] Do not merge your own PR without review
-- [ ] Do not silently replace the stack or rewrite from scratch
-- [ ] If you change API contracts, update code, docs, and tests together
-- [ ] If you deviate from Assignment 1 design, document it in `README.md` or `DEVIATIONS.md`
+- Branch from `main`
+- Keep each branch scoped to one clear area
+- Push branches to the same repo
+- Merge through review/integration, not by rewriting from scratch
+- Update code, docs, and tests together when contracts change
+- Treat `AI1220B-task-1/` as the only code root
+- Keep the setup local-first and reviewer-friendly
 
-## Branch Naming
+## Main Work Streams
 
-- [ ] Use `frontend/<short-task>`
-- [ ] Use `backend/<short-task>`
-- [ ] Use `ai-collab/<short-task>`
-- [ ] Example: `frontend/rich-text-editor`
-- [ ] Example: `backend/jwt-auth`
-- [ ] Example: `ai-collab/streaming-suggestions`
+- Frontend branch: `origin/frontend-document-editor`
+- Backend branch: `origin/backend/data` and related auth/document work merged into `main`
+- AI/collaboration branch: `ai-collab/streaming-ai`
+- Final integration branch: `integration/final-assignment2`
 
-## PR Checklist
-
-- [ ] Branch is up to date with `main`
-- [ ] PR changes one clear area of the system
-- [ ] No unrelated files are included
-- [ ] Relevant tests were run
-- [ ] README or deviations doc was updated if behavior changed
-- [ ] Manual test notes are written in the PR description
-
-## Coding Agent Rules
-
-- [ ] Treat `AI1220B-task-1/` as the only code root
-- [ ] Build on top of the current codebase instead of replacing it
-- [ ] Keep local-first setup easy for the reviewer
-- [ ] Do not commit secrets, `.env`, database files, `.venv`, `.next`, or `node_modules`
-- [ ] Respect ownership boundaries unless the task explicitly spans multiple areas
-
-## Person 1: Frontend / UX
+## Frontend / UX Ownership
 
 **Primary ownership**
 
@@ -72,40 +52,21 @@ The codebase already contains the Assignment 1 PoC. Assignment 2 work must exten
 - `frontend/app/components/`
 - `frontend/app/lib/`
 
-**Main goal**
+**Delivered**
 
-- Deliver the full client-side product flow for Assignment 2.
+- [x] Rich-text editor with headings, bold, italic, lists, and code blocks
+- [x] Registration and login screens
+- [x] Protected routes and persisted session flow
+- [x] Auto-save status in the editor
+- [x] Version history and restore UI
+- [x] Sharing UI for owner/editor/viewer roles
+- [x] AI suggestion compare/apply/reject/edit UI
+- [x] Progressive rendering of streamed AI output
+- [x] Cancel-generation support in the UI
+- [x] Presence UI for active collaborators
+- [x] Frontend component tests for auth, document flow, and AI suggestion flow
 
-### Todo
-
-- [x] Replace plain text editing with a rich-text editor that supports headings, bold, italic, lists, and code blocks
-- [x] Add registration and login screens with protected-route handling
-- [x] Persist session across refreshes and handle token expiry gracefully
-- [x] Add auto-save status in the editor
-- [x] Build version history and restore UI
-- [x] Build sharing UI for owner/editor/viewer assignment
-- [x] Build AI suggestion compare/apply/reject/edit UI
-- [x] Show streamed AI output progressively in the UI
-- [x] Add cancel-generation support in the UI
-- [x] Add presence UI for active collaborators
-- [x] Add frontend component tests for auth flow, document flow, and AI suggestion flow
-
-### Done
-
-- [x] Auth screens, protected routes, and persisted session flow are implemented in the frontend
-- [x] Rich-text editing, auto-save, version history, and restore UI are implemented in the frontend
-- [x] Sharing, role-aware UI states, and collaborator presence UI are implemented in the frontend
-- [x] AI suggestion review flow, progressive client-side rendering, and cancel support are implemented in the frontend
-- [x] Frontend component tests for auth, document UI, and AI suggestion UI are present and passing
-
-### Suggested branches
-
-- [ ] `frontend/auth-ui`
-- [ ] `frontend/rich-text-editor`
-- [ ] `frontend/ai-suggestion-ux`
-- [ ] `frontend/component-tests`
-
-## Person 2: Backend / Auth / Documents
+## Backend / Auth / Documents Ownership
 
 **Primary ownership**
 
@@ -118,33 +79,22 @@ The codebase already contains the Assignment 1 PoC. Assignment 2 work must exten
 - `backend/app/main.py`
 - `backend/tests/test_documents.py`
 
-**Main goal**
+**Delivered**
 
-- Deliver secure API foundations and document lifecycle features.
+- [x] Replaced demo identity flow with real registration and login
+- [x] Added securely hashed passwords
+- [x] Added JWT access and refresh tokens
+- [x] Protected API endpoints with auth
+- [x] Added token refresh flow
+- [x] Enforced owner/editor/viewer permissions server-side
+- [x] Aligned sharing to Assignment 2 roles
+- [x] Finalized version history and restore behavior for the auth model
+- [x] Scoped dashboard results to owned/shared documents
+- [x] Added backend auth, permissions, CRUD, and version tests
+- [x] Added meaningful FastAPI route descriptions and schemas
+- [x] Added one-command local startup support
 
-### Todo
-
-- [ ] Replace demo identity flow with real registration and login
-- [ ] Add securely hashed passwords
-- [ ] Add JWT access tokens and refresh tokens
-- [ ] Protect all API endpoints with auth
-- [ ] Add token refresh flow and logout/session cleanup behavior
-- [ ] Enforce owner/editor/viewer permissions server-side on every relevant route
-- [ ] Align sharing to Assignment 2 roles: owner, editor, viewer
-- [ ] Finalize version history and restore behavior for the real auth model
-- [ ] Ensure dashboard returns only owned/shared documents for the authenticated user
-- [ ] Add backend unit and integration tests for auth, permissions, CRUD, and version restore
-- [ ] Add meaningful FastAPI route descriptions and schemas for API docs
-- [ ] Add `run.sh` or `Makefile` support for one-command local startup
-
-### Suggested branches
-
-- [ ] `backend/jwt-auth`
-- [ ] `backend/permissions-hardening`
-- [ ] `backend/versioning-auth`
-- [ ] `backend/run-script-and-docs`
-
-## Person 3: AI / Collaboration / Streaming
+## AI / Collaboration / Streaming Ownership
 
 **Primary ownership**
 
@@ -153,61 +103,44 @@ The codebase already contains the Assignment 1 PoC. Assignment 2 work must exten
 - `backend/app/routers/ai.py`
 - `backend/tests/test_ai_and_collab.py`
 
-**Main goal**
+**Delivered**
 
-- Deliver the hard real-time and AI features required for Assignment 2.
-
-### Todo
-
-- [ ] Convert AI generation to true streaming responses
-- [ ] Support token-by-token streaming over SSE or WebSocket
-- [ ] Add cancel-in-progress generation support
-- [ ] Preserve or clearly discard partial output on stream failure
-- [ ] Keep prompt templates configurable in one prompt module or config area
-- [ ] Make LLM provider usage swappable behind one interface
-- [ ] Implement at least two strong AI features for the final demo
-- [ ] Ensure AI history logs input, prompt, model, response, and accept/reject state
-- [ ] Authenticate WebSocket connections with JWT
-- [ ] Improve collaboration session join, leave, reconnect, and resync flows
-- [ ] Ensure reasonable local propagation latency and state reconciliation on reconnect
-- [ ] Add WebSocket tests for auth and basic message exchange
-- [ ] Add backend AI tests with mocked LLM streaming behavior
-
-### Suggested branches
-
-- [ ] `ai-collab/streaming-ai`
-- [ ] `ai-collab/ws-auth`
-- [ ] `ai-collab/reconnect-sync`
-- [ ] `ai-collab/ai-history-and-prompts`
+- [x] Converted AI generation to true streaming responses
+- [x] Implemented token-by-token streaming over SSE
+- [x] Added cancel-in-progress generation support
+- [x] Preserved stream status clearly on cancellation and failure
+- [x] Centralized prompt templates in a prompt module
+- [x] Kept LLM provider usage behind one interface
+- [x] Implemented multiple AI features for the final demo
+- [x] Logged AI input, prompt excerpt, model, response, and status history
+- [x] Authenticated WebSocket connections with JWT
+- [x] Improved collaboration join, leave, reconnect, and resync flows
+- [x] Kept local propagation and reconnect reconciliation working
+- [x] Added WebSocket tests for auth and basic exchange
+- [x] Added backend AI tests with mocked LLM behavior
 
 ## Shared Cross-Cutting Tasks
 
-- [ ] Add `DEVIATIONS.md` or a dedicated README section for Assignment 1 vs Assignment 2 changes
-- [ ] Clean `.gitignore` if generated files are still tracked
-- [ ] Make sure `.env.example` files match the final required variables
-- [ ] Confirm the live demo flow works exactly in this order:
-- [ ] Registration and login
-- [ ] Protected routes
-- [ ] Document creation with rich-text editing and auto-save
-- [ ] Sharing with role enforcement
-- [ ] Real-time collaboration in two windows
-- [ ] AI assistant with streaming, cancellation, and suggestion UX
-- [ ] Version restore
+- [x] Added `DEVIATIONS.md` for Assignment 1 vs Assignment 2 changes
+- [x] Kept generated files out of tracked source deliverables
+- [x] Updated `.env.example` files to match final required variables
+- [x] Verified the live demo flow locally
 
-## Integration Order
+## Demo Flow Checklist
 
-- [ ] Step 1: Backend auth foundation lands first
-- [ ] Step 2: Frontend auth/session flow is wired to backend JWT
-- [ ] Step 3: Rich-text editor replaces plain editor
-- [ ] Step 4: Streaming AI backend and frontend are integrated together
-- [ ] Step 5: Authenticated WebSocket collaboration is finalized
-- [ ] Step 6: Tests, run script, README, and deviations doc are finalized
+- [x] Registration and login
+- [x] Protected routes
+- [x] Document creation with rich-text editing and auto-save
+- [x] Sharing with role enforcement
+- [x] Real-time collaboration in two windows
+- [x] AI assistant with streaming, cancellation, and suggestion UX
+- [x] Version restore
 
 ## Definition of Done
 
-- [ ] Code is merged to `main`
-- [ ] Relevant tests pass
-- [ ] Manual demo flow works locally
-- [ ] README setup is accurate from a clean clone
-- [ ] Deviation documentation is written
-- [ ] Each teammate has merged code in their owned area
+- [x] Code is merged to `main`
+- [x] Relevant tests pass
+- [x] Manual demo flow works locally
+- [x] README setup is accurate from a clean clone
+- [x] Deviation documentation is written
+- [x] Each major ownership area has merged code in `main`
