@@ -778,13 +778,16 @@ export default function DocumentEditor({ documentId }: { documentId: number }) {
       return;
     }
 
-    const targetUser = knownUsers.find((user) => user.email.toLowerCase() === nextEmail);
-    if (!targetUser) {
-      setShareError("No user with this email exists.");
-      return;
-    }
-
     try {
+      const users = await listUsers();
+      setKnownUsers(users);
+
+      const targetUser = users.find((user) => user.email.toLowerCase() === nextEmail);
+      if (!targetUser) {
+        setShareError("No user with this email exists.");
+        return;
+      }
+
       await upsertPermission(document.id, {
         user_id: targetUser.id,
         role: shareRole,
